@@ -3,7 +3,7 @@ name: Vinyl Arbitrage Scanner
 on:
   # ── Esegue ogni 3 ore ──────────────────────
   schedule:
-    - cron: "0 */3 * * *"
+    - cron: "0 * * * *"
 
   # ── Esecuzione manuale dal tab Actions ─────
   workflow_dispatch:
