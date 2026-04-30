@@ -1,0 +1,63 @@
+name: Vinyl Arbitrage Scanner
+
+on:
+  # ── Esegue ogni 3 ore ──────────────────────
+  schedule:
+    - cron: "0 */3 * * *"
+
+  # ── Esecuzione manuale dal tab Actions ─────
+  workflow_dispatch:
+
+jobs:
+  scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 50
+
+    steps:
+      # 1. Scarica il codice
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      # 2. Installa Python 3.11
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      # 3. Cache delle dipendenze per velocizzare i run
+      - name: Cache pip
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+
+      # 4. Installa le librerie Python
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      # 5. Ripristina il database SQLite dal run precedente
+      #    (GitHub Actions non ha storage persistente, usiamo cache)
+      - name: Restore database cache
+        uses: actions/cache@v4
+        with:
+          path: vinyl_arbitrage.db
+          key: vinyl-db-${{ github.run_id }}
+          restore-keys: vinyl-db-
+
+      # 6. Esegue lo scanner
+      - name: Run scanner
+        env:
+          DISCOGS_TOKEN:      ${{ secrets.DISCOGS_TOKEN }}
+          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: python scanner.py
+
+      # 7. Salva il database aggiornato per il prossimo run
+      - name: Save database cache
+        if: always()
+        uses: actions/cache@v4
+        with:
+          path: vinyl_arbitrage.db
+          key: vinyl-db-${{ github.run_id }}
