@@ -1,7 +1,6 @@
 """
-VINYL ARBITRAGE SCANNER — scanner.py v2
-Ottimizzato per girare in max 30 minuti ogni ora.
-Usa solo ricerche per query (più preciso, più veloce).
+VINYL ARBITRAGE SCANNER — scanner.py v3
+Bugfix: list index out of range, search params corretti, watchlist corretta.
 """
 import time
 import traceback
@@ -21,15 +20,10 @@ from telegram_alerts import (
     send_error_alert, send_startup_message
 )
 from watchlist import WATCHLIST
-from config import (
-    MIN_SCORE, MAX_LISTINGS_PER_RELEASE,
-    ACCEPTED_CONDITIONS
-)
+from config import MIN_SCORE
 
-# Massimo listing da analizzare per run (per stare nei 30 min)
-MAX_RESULTS_PER_QUERY   = 8    # release da esaminare per ogni query
-MAX_LISTING_PER_RELEASE = 5    # listing da esaminare per release
-TIER_A_ONLY_FIRST_RUN   = False
+MAX_RESULTS_PER_QUERY   = 8
+MAX_LISTING_PER_RELEASE = 5
 
 
 def safe_get(d, *keys, default=None):
@@ -40,17 +34,32 @@ def safe_get(d, *keys, default=None):
     return d
 
 
+def get_artist_name(details: dict) -> str:
+    """Estrae nome artista in modo sicuro, gestisce lista vuota."""
+    artists = details.get("artists") or []
+    if artists and isinstance(artists, list) and len(artists) > 0:
+        return artists[0].get("name", "?")
+    # Fallback: prova dal titolo o dal campo extraartists
+    title = details.get("title", "?")
+    return title.split(" - ")[0] if " - " in title else "?"
+
+
+def get_label_name(details: dict) -> str:
+    """Estrae nome label in modo sicuro."""
+    labels = details.get("labels") or []
+    if labels and isinstance(labels, list) and len(labels) > 0:
+        return labels[0].get("name", "")
+    return ""
+
+
 def get_median(release_id: int, details: dict) -> float:
-    """Estrae mediana in modo veloce senza chiamate extra se possibile."""
-    # Prima prova dalla community stats (no chiamata extra)
+    """Stima mediana senza chiamate extra quando possibile."""
     lp = safe_get(details, "lowest_price")
-    community_have = safe_get(details, "community", "have", default=0)
+    community_have = safe_get(details, "community", "have", default=0) or 0
 
-    # Se il disco ha almeno 5 vendite usa il lowest price come proxy
-    if lp and lp > 0 and community_have and community_have > 5:
-        return float(lp) * 1.4  # stima mediana = lowest * 1.4
+    if lp and float(lp) > 0 and community_have > 5:
+        return round(float(lp) * 1.4, 2)
 
-    # Fallback: chiama price_suggestions
     stats = dc.get_price_stats(release_id)
     if stats:
         for grade in ("Near Mint (NM or M-)", "Very Good Plus (VG+)", "Mint (M)"):
@@ -61,146 +70,144 @@ def get_median(release_id: int, details: dict) -> float:
 
 
 def analyze_release(release_id: int) -> int:
-    """Analizza una release. Ritorna 1 se trova opportunità, 0 altrimenti."""
-    details = dc.get_release_details(release_id)
-    if not details:
+    """Analizza una release. Ritorna 1 se trova e alerta un'opportunità."""
+    try:
+        details = dc.get_release_details(release_id)
+        if not details:
+            return 0
+
+        artist   = get_artist_name(details)
+        title    = details.get("title", "?")
+        label    = get_label_name(details)
+        year     = str(details.get("year", ""))
+        country  = details.get("country", "US")
+        wantlist = safe_get(details, "community", "want", default=0) or 0
+        for_sale = details.get("num_for_sale", 0) or 0
+        notes    = details.get("notes", "") or ""
+
+        if wantlist < 50:
+            return 0
+
+        median = get_median(release_id, details)
+        if median <= 0:
+            return 0
+
+        listings_data = dc.get_marketplace_listings(release_id)
+        if not listings_data:
+            return 0
+
+        listings = (listings_data.get("listings") or [])[:MAX_LISTING_PER_RELEASE]
+        found = 0
+
+        for listing in listings:
+            listing_id = str(listing.get("id", ""))
+            condition  = safe_get(listing, "condition") or ""
+            price      = safe_get(listing, "price", "value") or 0
+            price      = float(price)
+            seller     = listing.get("seller") or {}
+            ships_from = listing.get("ships_from", "US") or "US"
+            comments   = listing.get("comments", "") or ""
+
+            if opportunity_exists(listing_id):
+                continue
+
+            ok, _ = passes_prefilter(listing, median)
+            if not ok:
+                continue
+
+            full_text   = f"{comments} {artist} {title} {label} {notes}".lower()
+            rarity_sigs = find_rarity_signals(full_text)
+            flags       = find_red_flags(full_text)
+
+            if flags and not rarity_sigs:
+                continue
+
+            if detect_first_press_from_matrix(notes):
+                rarity_sigs.append("first press (matrix detected)")
+            for eng in detect_engineer_initials(notes):
+                rarity_sigs.append(f"engineer: {eng}")
+
+            profit_data = calc_profit(price, median, condition, ships_from)
+            if profit_data["gross_profit"] <= 0:
+                continue
+
+            opp = {
+                "listing_id":      listing_id,
+                "source":          "discogs",
+                "release_id":      str(release_id),
+                "artist":          artist,
+                "title":           title,
+                "label":           label,
+                "year":            year,
+                "country":         country,
+                "condition":       condition,
+                "listing_price":   price,
+                "median_price":    median,
+                "est_sell_price":  profit_data["est_sell_price"],
+                "gross_profit":    profit_data["gross_profit"],
+                "roi":             profit_data["roi"],
+                "rarity_signals":  rarity_sigs,
+                "red_flags":       flags,
+                "wantlist_count":  wantlist,
+                "num_for_sale":    for_sale,
+                "seller_username": seller.get("username", ""),
+                "seller_rating":   safe_get(seller, "stats", "rating") or 0,
+                "seller_reviews":  safe_get(seller, "stats", "total") or 0,
+                "listing_url":     f"https://www.discogs.com/sell/item/{listing_id}",
+            }
+
+            opp["score"] = score_opportunity(opp)
+            save_opportunity(opp)
+
+            print(
+                f"    💿 {artist} — {title} | "
+                f"€{price:.0f} vs mediana €{median:.0f} | "
+                f"ROI {opp['roi']*100:.0f}% | Score {opp['score']}/10"
+            )
+
+            if opp["score"] >= MIN_SCORE:
+                if send_opportunity_alert(opp):
+                    mark_alerted(listing_id)
+                    found += 1
+                    print(f"    ✅ ALERT — Score {opp['score']}/10")
+                time.sleep(1)
+
+        return found
+
+    except Exception as e:
+        print(f"    ⚠️ Errore analisi release {release_id}: {e}")
         return 0
-
-    artist    = safe_get(details, "artists", default=[{}])[0].get("name", "?")
-    title     = details.get("title", "?")
-    label     = safe_get(details, "labels", default=[{}])[0].get("name", "")
-    year      = str(details.get("year", ""))
-    country   = details.get("country", "US")
-    wantlist  = safe_get(details, "community", "want", default=0)
-    for_sale  = details.get("num_for_sale", 0)
-    notes     = details.get("notes", "")
-
-    # Salta se troppo comune (pochi want = non vale)
-    if wantlist < 50:
-        return 0
-
-    median = get_median(release_id, details)
-    if median <= 0:
-        return 0
-
-    # Listing attivi
-    listings_data = dc.get_marketplace_listings(release_id)
-    if not listings_data:
-        return 0
-
-    listings = listings_data.get("listings", [])[:MAX_LISTING_PER_RELEASE]
-    found = 0
-
-    for listing in listings:
-        listing_id = str(listing.get("id", ""))
-        condition  = safe_get(listing, "condition", default="")
-        price      = safe_get(listing, "price", "value", default=0) or 0
-        seller     = listing.get("seller", {})
-        ships_from = listing.get("ships_from", "US")
-        comments   = listing.get("comments", "")
-
-        if opportunity_exists(listing_id):
-            continue
-
-        ok, reason = passes_prefilter(listing, median)
-        if not ok:
-            continue
-
-        full_text    = f"{comments} {artist} {title} {label} {notes}".lower()
-        rarity_sigs  = find_rarity_signals(full_text)
-        flags        = find_red_flags(full_text)
-
-        # Scarta se ha red flag e nessun segnale rarità
-        if flags and not rarity_sigs:
-            continue
-
-        if detect_first_press_from_matrix(notes):
-            rarity_sigs.append("first press (matrix detected)")
-        for eng in detect_engineer_initials(notes):
-            rarity_sigs.append(f"engineer: {eng}")
-
-        profit_data = calc_profit(price, median, condition, ships_from)
-        if profit_data["gross_profit"] <= 0:
-            continue
-
-        opp = {
-            "listing_id":      listing_id,
-            "source":          "discogs",
-            "release_id":      str(release_id),
-            "artist":          artist,
-            "title":           title,
-            "label":           label,
-            "year":            year,
-            "country":         country,
-            "condition":       condition,
-            "listing_price":   price,
-            "median_price":    median,
-            "est_sell_price":  profit_data["est_sell_price"],
-            "gross_profit":    profit_data["gross_profit"],
-            "roi":             profit_data["roi"],
-            "rarity_signals":  rarity_sigs,
-            "red_flags":       flags,
-            "wantlist_count":  wantlist,
-            "num_for_sale":    for_sale,
-            "seller_username": seller.get("username", ""),
-            "seller_rating":   safe_get(seller, "stats", "rating", default=0),
-            "seller_reviews":  safe_get(seller, "stats", "total", default=0),
-            "listing_url":     f"https://www.discogs.com/sell/item/{listing_id}",
-        }
-
-        opp["score"] = score_opportunity(opp)
-        save_opportunity(opp)
-
-        print(
-            f"    💿 {artist} — {title} | "
-            f"€{price:.0f} vs €{median:.0f} mediana | "
-            f"ROI {opp['roi']*100:.0f}% | Score {opp['score']}/10"
-        )
-
-        if opp["score"] >= MIN_SCORE:
-            if send_opportunity_alert(opp):
-                mark_alerted(listing_id)
-                found += 1
-                print(f"    ✅ ALERT INVIATO — Score {opp['score']}/10")
-            time.sleep(1)
-
-    return found
 
 
 def scan_query(query: str, name: str, tier: str) -> int:
-    """Cerca release tramite query e analizza le prime N."""
+    """Cerca release per query e analizza le prime N."""
     print(f"\n🔎 [{tier}] {name}")
 
     results = dc.search_releases(query=query, page=1)
     if not results:
-        print(f"    Nessun risultato")
+        print(f"    Nessun risultato per: {query}")
         return 0
 
-    releases = results.get("results", [])[:MAX_RESULTS_PER_QUERY]
-    found = 0
+    releases = (results.get("results") or [])[:MAX_RESULTS_PER_QUERY]
+    if not releases:
+        print(f"    Lista risultati vuota")
+        return 0
 
+    found = 0
     for r in releases:
         rid = r.get("id")
         if not rid:
             continue
-
-        artist_title = f"{r.get('title', '?')}"
-        print(f"  → {artist_title}")
-
-        try:
-            found += analyze_release(rid)
-        except Exception as e:
-            print(f"    ⚠️ Errore su release {rid}: {e}")
-            continue
-
-        time.sleep(0.5)  # Piccola pausa tra release
+        print(f"  → {r.get('title', '?')} [{rid}]")
+        found += analyze_release(rid)
+        time.sleep(0.5)
 
     return found
 
 
 def main():
     print("=" * 55)
-    print("🎵 VINYL ARBITRAGE SCANNER v2 — Avvio")
+    print("🎵 VINYL ARBITRAGE SCANNER v3 — Avvio")
     print("=" * 55)
 
     init_db()
@@ -208,27 +215,27 @@ def main():
 
     total_found = 0
 
-    # Ordine: prima Tier A, poi B, poi C
     for tier in ("A", "B", "C"):
         entries = [e for e in WATCHLIST if e.get("tier") == tier]
         print(f"\n{'='*20} TIER {tier} — {len(entries)} ricerche {'='*20}")
 
         for entry in entries:
             try:
-                found = scan_query(
-                    query=entry.get("query", ""),
-                    name=entry.get("name", "?"),
-                    tier=tier
-                )
-                total_found += found
+                if entry.get("type") == "search":
+                    found = scan_query(
+                        query=entry["query"],
+                        name=entry["name"],
+                        tier=tier
+                    )
+                    total_found += found
+                else:
+                    print(f"  ⚠️ Tipo non supportato: {entry.get('type')}")
             except Exception as e:
                 print(f"  ❌ Errore su {entry.get('name')}: {e}")
                 continue
+            time.sleep(1)
 
-            time.sleep(1)  # Pausa tra query
-
-    # ── Sommario finale ────────────────────────────────
-    today  = get_today_stats()
+    today   = get_today_stats()
     alltime = get_all_time_stats()
 
     print("\n" + "=" * 55)
