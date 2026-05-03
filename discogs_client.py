@@ -1,6 +1,7 @@
 """
-VINYL ARBITRAGE SCANNER — Discogs Client v3
-Bugfix: marketplace search restituisce "results", non "listings".
+VINYL ARBITRAGE SCANNER — Discogs Client v4
+BUGFIX DEFINITIVO: /marketplace/search richiede OAuth, non funziona con token.
+Nuova strategia: usiamo lowest_price dal release endpoint + price_suggestions.
 """
 import time
 import requests
@@ -30,10 +31,12 @@ def _get(endpoint: str, params: dict = None) -> dict | None:
             if r.status_code == 429:
                 print(f"  Rate limit — attendo 60s...")
                 time.sleep(60)
+            elif r.status_code in (401, 403):
+                print(f"  Auth error {r.status_code} — endpoint richiede OAuth")
+                return None
             elif r.status_code == 404:
                 return None
             else:
-                print(f"  HTTP {r.status_code} su {endpoint}")
                 return None
         except requests.RequestException as e:
             print(f"  Errore rete (tentativo {attempt+1}): {e}")
@@ -42,7 +45,7 @@ def _get(endpoint: str, params: dict = None) -> dict | None:
 
 
 def search_releases(query: str, page: int = 1) -> dict | None:
-    """Cerca nel database Discogs — restituisce chiave 'results'."""
+    """Cerca release nel database Discogs."""
     return _get("/database/search", {
         "q":        query,
         "type":     "release",
@@ -53,34 +56,27 @@ def search_releases(query: str, page: int = 1) -> dict | None:
 
 
 def get_release_details(release_id: int) -> dict | None:
+    """
+    Dettaglio release. Contiene:
+    - lowest_price: prezzo più basso attuale in marketplace
+    - num_for_sale: quanti in vendita
+    - community.want / community.have
+    """
     return _get(f"/releases/{release_id}")
 
 
-def get_marketplace_listings(release_id: int) -> list:
+def get_price_suggestions(release_id: int) -> dict | None:
     """
-    Restituisce lista di listing attivi per questa release.
-    BUGFIX: l'endpoint /marketplace/search restituisce 'results' non 'listings'.
-    Ordina per prezzo crescente, filtra solo For Sale.
+    Prezzi suggeriti per condizione (calcolati da vendite reali).
+    Funziona con token semplice.
+    Restituisce mediane per: Mint, Near Mint, VG+, VG, G+
     """
-    data = _get("/marketplace/search", {
-        "release_id": release_id,
-        "status":     "For Sale",
-        "sort":       "price",
-        "sort_order": "asc",
-        "per_page":   25,
-    })
-    if not data:
-        return []
-
-    # Debug: mostra le chiavi restituite se non trova results
-    results = data.get("results") or data.get("listings") or []
-    if not results and data:
-        keys = list(data.keys())
-        print(f"      ↳ Marketplace response keys: {keys}")
-
-    return results
-
-
-def get_price_stats(release_id: int) -> dict | None:
-    """Prezzi suggeriti Discogs per condizione (mediana da vendite reali)."""
     return _get(f"/marketplace/price_suggestions/{release_id}")
+
+
+def get_marketplace_url(release_id: int) -> str:
+    """URL diretto al marketplace per questa release, ordinato per prezzo."""
+    return (
+        f"https://www.discogs.com/sell/release/{release_id}"
+        f"?status=For+Sale&sort=price%2Casc"
+    )
