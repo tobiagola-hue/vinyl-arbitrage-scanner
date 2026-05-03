@@ -1,168 +1,113 @@
 """
-VINYL ARBITRAGE SCANNER — Watchlist
-Definisce cosa monitorare: artisti, label, ricerche specifiche.
-Personalizza questa lista in base al tuo mercato e competenze.
-
-Tier A = Alta liquidità + alto margine (sempre attivi)
-Tier B = Opportunistici (buoni mercati ma meno certi)
-Tier C = Artisti specifici che conosci bene
+VINYL ARBITRAGE SCANNER — Watchlist v2
+Focus su: pressature rare, label di nicchia, generi cult.
+NON artisti mainstream famosi (troppa competizione, margini bassi).
+Strategia: cercare per GENERE + TIPO PRESSATURA + LABEL piccola.
 """
 
-# ─────────────────────────────────────────────
-# WATCHLIST PRINCIPALE
-# Ogni entry ha:
-#   name   → nome leggibile (solo per log)
-#   type   → "artist" | "label" | "search"
-#   id     → Discogs ID (per artist/label)
-#   query  → stringa di ricerca (per type="search")
-#   tier   → "A" | "B" | "C"
-# ─────────────────────────────────────────────
 WATCHLIST = [
 
-    # ── TIER A — Jazz Originale ─────────────────────────
-    # Pressature Blue Note anni '50-'60 valgono centinaia/migliaia
-    {"name": "Miles Davis",         "type": "artist", "id": 53449,   "tier": "A"},
-    {"name": "John Coltrane",       "type": "artist", "id": 24736,   "tier": "A"},
-    {"name": "Bill Evans",          "type": "artist", "id": 65463,   "tier": "A"},
-    {"name": "Thelonious Monk",     "type": "artist", "id": 34429,   "tier": "A"},
-    {"name": "Charles Mingus",      "type": "artist", "id": 39879,   "tier": "A"},
-    {"name": "Herbie Hancock",      "type": "artist", "id": 31867,   "tier": "A"},
-    {"name": "Sonny Rollins",       "type": "artist", "id": 36797,   "tier": "A"},
-    {"name": "Wes Montgomery",      "type": "artist", "id": 53536,   "tier": "A"},
+    # ── JAZZ ORIGINALE ANNI '50-'60 ─────────────────────
+    {"name": "Blue Note Original Press",    "type": "search", "query": "blue note original pressing 1950s 1960s", "tier": "A"},
+    {"name": "Prestige Records Original",   "type": "search", "query": "prestige records original pressing jazz vinyl", "tier": "A"},
+    {"name": "Impulse Records Original",    "type": "search", "query": "impulse records original pressing vinyl", "tier": "A"},
+    {"name": "Riverside Records Jazz",      "type": "search", "query": "riverside records original jazz pressing vinyl", "tier": "A"},
 
-    # ── TIER A — Rock UK Originale ──────────────────────
-    # UK pressings anni '60-'70 valgono molto di più delle edizioni US
-    {"name": "The Beatles",         "type": "artist", "id": 82730,   "tier": "A"},
-    {"name": "Pink Floyd",          "type": "artist", "id": 45467,   "tier": "A"},
-    {"name": "Led Zeppelin",        "type": "artist", "id": 3648,    "tier": "A"},
-    {"name": "David Bowie",         "type": "artist", "id": 59486,   "tier": "A"},
-    {"name": "The Rolling Stones",  "type": "artist", "id": 38216,   "tier": "A"},
-    {"name": "The Who",             "type": "artist", "id": 23996,   "tier": "A"},
-    {"name": "Jimi Hendrix",        "type": "artist", "id": 27227,   "tier": "A"},
-    {"name": "Cream",               "type": "artist", "id": 92803,   "tier": "A"},
+    # ── SOUL / FUNK ──────────────────────────────────────
+    {"name": "Northern Soul 45",            "type": "search", "query": "northern soul original 45 rpm rare", "tier": "A"},
+    {"name": "Funk Soul Small Label",       "type": "search", "query": "funk soul rare small label original 1960s 1970s", "tier": "A"},
+    {"name": "Motown Original",             "type": "search", "query": "motown tamla original pressing 1960s vinyl", "tier": "A"},
 
-    # ── TIER A — Soul / Funk ────────────────────────────
-    # Piccole label soul sono spesso rare e sottovalutate
-    {"name": "Marvin Gaye",         "type": "artist", "id": 54131,   "tier": "A"},
-    {"name": "James Brown",         "type": "artist", "id": 15234,   "tier": "A"},
-    {"name": "Curtis Mayfield",     "type": "artist", "id": 75900,   "tier": "A"},
-    {"name": "Stevie Wonder",       "type": "artist", "id": 180,     "tier": "A"},
-    {"name": "Al Green",            "type": "artist", "id": 119639,  "tier": "A"},
-    {"name": "Sly and The Family Stone", "type": "artist", "id": 139858, "tier": "A"},
+    # ── KRAUTROCK / PROG TEDESCO ─────────────────────────
+    {"name": "Krautrock Original German",   "type": "search", "query": "krautrock original german pressing 1970s vinyl", "tier": "A"},
+    {"name": "Can Faust Neu Original",      "type": "search", "query": "can faust neu amon duul original pressing vinyl", "tier": "A"},
 
-    # ── TIER B — Hip-Hop Originale ──────────────────────
-    # Prime pressature hip-hop anni '88-'98 sempre in forte domanda
-    {"name": "Wu-Tang Clan",        "type": "artist", "id": 63791,   "tier": "B"},
-    {"name": "Notorious B.I.G.",    "type": "artist", "id": 51478,   "tier": "B"},
-    {"name": "Nas",                 "type": "artist", "id": 35783,   "tier": "B"},
-    {"name": "Jay-Z",               "type": "artist", "id": 169705,  "tier": "B"},
-    {"name": "A Tribe Called Quest","type": "artist", "id": 26759,   "tier": "B"},
-    {"name": "De La Soul",          "type": "artist", "id": 66836,   "tier": "B"},
-    {"name": "Kendrick Lamar",      "type": "artist", "id": 2874688, "tier": "B"},
-    {"name": "Madlib",              "type": "artist", "id": 179820,  "tier": "B"},
+    # ── PSYCH / GARAGE '60s ──────────────────────────────
+    {"name": "Psych Garage 60s",            "type": "search", "query": "psychedelic garage original pressing 1966 1967 1968", "tier": "A"},
+    {"name": "UK Psych Original",           "type": "search", "query": "uk psychedelic original pressing vinyl 1967 1968 1969", "tier": "A"},
 
-    # ── TIER B — Punk / Post-Punk ────────────────────────
-    {"name": "The Clash",           "type": "artist", "id": 43511,   "tier": "B"},
-    {"name": "Sex Pistols",         "type": "artist", "id": 40603,   "tier": "B"},
-    {"name": "Joy Division",        "type": "artist", "id": 68874,   "tier": "B"},
-    {"name": "The Smiths",          "type": "artist", "id": 44818,   "tier": "B"},
-    {"name": "The Cure",            "type": "artist", "id": 61094,   "tier": "B"},
-    {"name": "New Order",           "type": "artist", "id": 15273,   "tier": "B"},
+    # ── LIBRARY MUSIC ────────────────────────────────────
+    {"name": "Library Music Rare",          "type": "search", "query": "library music original pressing vinyl rare", "tier": "B"},
+    {"name": "Jazz Fusion Rare",            "type": "search", "query": "jazz fusion rare original pressing 1970s vinyl", "tier": "B"},
 
-    # ── TIER B — Elettronica Classica ───────────────────
-    {"name": "Daft Punk",           "type": "artist", "id": 5765,    "tier": "B"},
-    {"name": "Aphex Twin",          "type": "artist", "id": 45,      "tier": "B"},
-    {"name": "Boards of Canada",    "type": "artist", "id": 21942,   "tier": "B"},
+    # ── PRESSATURE GIAPPONESI CON OBI ───────────────────
+    {"name": "Japan OBI Jazz",              "type": "search", "query": "japan obi strip jazz vinyl", "tier": "B"},
+    {"name": "Japan OBI Rock",              "type": "search", "query": "japan obi strip rock vinyl original", "tier": "B"},
 
-    # ── TIER B — Ricerche Per Tipo Pressatura ────────────
-    # Pressature giapponesi con OBI strip originale
-    {
-        "name":  "Japan OBI Strip First Press",
-        "type":  "search",
-        "query": "japan obi strip original pressing",
-        "tier":  "B"
-    },
-    # Edizioni limitate colorate sottovalutate
-    {
-        "name":  "Colored Vinyl Limited",
-        "type":  "search",
-        "query": "colored vinyl limited edition 2018 2019 2020",
-        "tier":  "B"
-    },
+    # ── ELETTRONICA ANNI '70-'90 ─────────────────────────
+    {"name": "Electronic Ambient 70s-80s",  "type": "search", "query": "electronic ambient original pressing vinyl 1970s 1980s", "tier": "B"},
+    {"name": "Early Techno House 88-91",    "type": "search", "query": "early techno house original pressing 1988 1989 1990 1991", "tier": "B"},
 
-    # ── TIER C — Aggiungi i tuoi artisti target ──────────
-    # Modifica questa sezione in base al tuo mercato specifico
-    {"name": "Nirvana",             "type": "artist", "id": 125246,  "tier": "C"},
-    {"name": "Radiohead",           "type": "artist", "id": 3840,    "tier": "C"},
-    {"name": "Nick Cave",           "type": "artist", "id": 9747,    "tier": "C"},
-    {"name": "Tom Waits",           "type": "artist", "id": 168279,  "tier": "C"},
-    {"name": "Bob Dylan",           "type": "artist", "id": 6059,    "tier": "C"},
-    {"name": "Neil Young",          "type": "artist", "id": 76896,   "tier": "C"},
+    # ── FOLK / PSYCH-FOLK ────────────────────────────────
+    {"name": "Folk Psych Original",         "type": "search", "query": "folk psych original pressing vinyl 1968 1969 1970 1971", "tier": "B"},
 
+    # ── REGGAE / DUB ORIGINALE ───────────────────────────
+    {"name": "Reggae Dub Jamaica Original", "type": "search", "query": "reggae dub original jamaican pressing vinyl studio one", "tier": "B"},
+
+    # ── LATIN / BOSSA NOVA ───────────────────────────────
+    {"name": "Bossa Nova Latin Original",   "type": "search", "query": "bossa nova latin original pressing vinyl 1960s rare", "tier": "B"},
+
+    # ── TIPO PRESSATURA SPECIALE ─────────────────────────
+    {"name": "Test Press Acetate",          "type": "search", "query": "test pressing acetate vinyl rare", "tier": "A"},
+    {"name": "White Label Promo",           "type": "search", "query": "white label promo original vinyl not for sale", "tier": "A"},
+    {"name": "Colored Vinyl Limited",       "type": "search", "query": "colored vinyl limited edition original rare", "tier": "B"},
+
+    # ── HIP HOP ORIGINALE '88-'93 ────────────────────────
+    {"name": "Hip Hop Original 88-93",      "type": "search", "query": "hip hop original pressing vinyl 1988 1989 1990 1991 1992 1993", "tier": "B"},
+
+    # ── POST-PUNK / COLD WAVE ────────────────────────────
+    {"name": "Post Punk Cold Wave 79-82",   "type": "search", "query": "post punk cold wave original pressing 1979 1980 1981 1982", "tier": "C"},
+
+    # ── PROG ROCK ORIGINALE ──────────────────────────────
+    {"name": "Prog Rock Original 70s",      "type": "search", "query": "progressive rock original pressing vinyl 1970 1971 1972 1973", "tier": "C"},
 ]
 
 # ─────────────────────────────────────────────
-# KEYWORDS: segnali di rarità nel testo del listing
-# Se trovate nella descrizione del venditore, aumentano lo score
+# KEYWORDS RARITÀ
 # ─────────────────────────────────────────────
 RARITY_KEYWORDS = [
-    # First press markers
     "first press", "first pressing", "1st press", "1st pressing",
     "original press", "original pressing", "original uk", "original us",
-    "original german", "original japan",
-    # Pressature speciali
-    "obi strip", "obi-strip", "obi", "bowing strip",
+    "original german", "original japan", "original french",
+    "obi strip", "obi-strip", "obi",
     "promo", "white label promo", "dj copy", "not for sale",
     "test press", "test pressing", "acetate",
-    # Edizioni limitate
-    "numbered", "hand numbered", "hand-numbered", "limited edition",
-    "limited to", "limited run", "one-time press",
-    # Vinile speciale
+    "numbered", "hand numbered", "limited edition", "limited to",
+    "one-time press",
     "colored vinyl", "colour vinyl", "red vinyl", "blue vinyl",
     "white vinyl", "clear vinyl", "splatter", "marbled", "picture disc",
-    "picture disk",
-    # Condizione eccezionale
-    "sealed", "still sealed", "factory sealed", "shrink wrap intact",
-    "unplayed", "mint unplayed",
-    # Errori/varianti
-    "misprint", "mispress", "mispressing", "alternate cover",
-    "withdrawn", "banned cover", "recalled",
-    # Gatefold / inserti originali
-    "gatefold original", "poster intact", "all inserts", "original inner",
+    "sealed", "still sealed", "factory sealed", "unplayed",
+    "misprint", "mispress", "alternate cover", "withdrawn", "banned",
+    "gatefold original", "poster intact", "all inserts",
+    "matrix", "dead wax", "runout",
 ]
 
 # ─────────────────────────────────────────────
-# RED FLAGS: segnali che indicano ristampa o problema
-# Penalizzano lo score o scartano il listing
+# RED FLAGS: ristampe moderne
 # ─────────────────────────────────────────────
 RED_FLAGS = [
-    # Label di ristampe moderne note
     "music on vinyl", "back to black", "vinyl me please",
     "rhino records", "demon records", "culture factory",
-    "wax love", "speakers corner",
-    # Indicatori di ristampa
-    "reissue", "re-issue", "repress", "re-press", "re press",
-    "remastered", "re-mastered", "digitally remastered",
+    "wax love", "speakers corner", "friday music",
+    "reissue", "re-issue", "repress", "re-press",
+    "remastered", "digitally remastered",
     "from digital source", "from cd master",
-    "180g reissue", "180 gram reissue",
-    "anniversary edition" , "commemorative edition",
-    # Indicatori specifici nel matrix
+    "180g reissue", "anniversary edition",
     "lacquer cut from digital",
 ]
 
 # ─────────────────────────────────────────────
 # MOLTIPLICATORI PAESE
-# Le pressature originali di certi paesi valgono di più
 # ─────────────────────────────────────────────
 COUNTRY_VALUE_MULTIPLIERS = {
-    "Japan":          1.50,   # Pressature giapponesi con OBI = premium
-    "UK":             1.30,   # UK press spesso originali e superiori
-    "Germany":        1.20,   # Ottime pressature tecnicamente
-    "Netherlands":    1.10,   # Philips / Phonogram di qualità
-    "France":         1.05,
-    "US":             1.00,   # Reference standard
-    "Italy":          0.90,
-    "Australia":      0.85,
-    "Canada":         0.90,
-    "Spain":          0.80,
+    "Japan":       1.50,
+    "UK":          1.30,
+    "Germany":     1.20,
+    "Netherlands": 1.10,
+    "France":      1.05,
+    "US":          1.00,
+    "Italy":       0.90,
+    "Australia":   0.85,
+    "Canada":      0.90,
+    "Spain":       0.80,
 }
