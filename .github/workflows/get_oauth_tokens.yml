@@ -1,0 +1,83 @@
+name: Get Discogs OAuth Tokens (esegui una volta sola)
+
+on:
+  workflow_dispatch:
+    inputs:
+      verifier:
+        description: "Lascia VUOTO al primo run. Al secondo run incolla il codice da Discogs."
+        required: false
+        default: ""
+
+jobs:
+  oauth:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+
+      - run: pip install requests requests-oauthlib
+
+      - name: Step 1 - Ottieni URL autorizzazione (verifier vuoto)
+        if: ${{ github.event.inputs.verifier == '' }}
+        env:
+          DISCOGS_CONSUMER_KEY:    ${{ secrets.DISCOGS_CONSUMER_KEY }}
+          DISCOGS_CONSUMER_SECRET: ${{ secrets.DISCOGS_CONSUMER_SECRET }}
+        run: |
+          python - << 'EOF'
+          import os
+          from requests_oauthlib import OAuth1Session
+
+          key    = os.environ["DISCOGS_CONSUMER_KEY"]
+          secret = os.environ["DISCOGS_CONSUMER_SECRET"]
+
+          oauth = OAuth1Session(key, client_secret=secret, callback_uri="oob")
+          resp  = oauth.fetch_request_token("https://api.discogs.com/oauth/request_token")
+
+          token  = resp["oauth_token"]
+          tsecret= resp["oauth_token_secret"]
+          url    = f"https://www.discogs.com/it/oauth/authorize?oauth_token={token}"
+
+          print("=" * 60)
+          print("PASSO 1 — Apri questo URL nel browser e autorizza:")
+          print(url)
+          print("=" * 60)
+          print(f"REQUEST_TOKEN={token}")
+          print(f"REQUEST_SECRET={tsecret}")
+          print("=" * 60)
+          print("Poi ri-esegui questo workflow incollando il CODICE che Discogs ti dà.")
+          EOF
+
+      - name: Step 2 - Ottieni Access Token (con verifier)
+        if: ${{ github.event.inputs.verifier != '' }}
+        env:
+          DISCOGS_CONSUMER_KEY:    ${{ secrets.DISCOGS_CONSUMER_KEY }}
+          DISCOGS_CONSUMER_SECRET: ${{ secrets.DISCOGS_CONSUMER_SECRET }}
+          DISCOGS_REQUEST_TOKEN:   ${{ secrets.DISCOGS_REQUEST_TOKEN }}
+          DISCOGS_REQUEST_SECRET:  ${{ secrets.DISCOGS_REQUEST_SECRET }}
+          VERIFIER:                ${{ github.event.inputs.verifier }}
+        run: |
+          python - << 'EOF'
+          import os
+          from requests_oauthlib import OAuth1Session
+
+          key     = os.environ["DISCOGS_CONSUMER_KEY"]
+          secret  = os.environ["DISCOGS_CONSUMER_SECRET"]
+          rtoken  = os.environ["DISCOGS_REQUEST_TOKEN"]
+          rsecret = os.environ["DISCOGS_REQUEST_SECRET"]
+          verifier= os.environ["VERIFIER"].strip()
+
+          oauth = OAuth1Session(key, client_secret=secret,
+                                resource_owner_key=rtoken,
+                                resource_owner_secret=rsecret,
+                                verifier=verifier)
+          resp = oauth.fetch_access_token("https://api.discogs.com/oauth/access_token")
+
+          print("=" * 60)
+          print("✅ COMPLETATO! Aggiungi questi 2 secret a GitHub:")
+          print(f"DISCOGS_ACCESS_TOKEN  = {resp['oauth_token']}")
+          print(f"DISCOGS_ACCESS_SECRET = {resp['oauth_token_secret']}")
+          print("=" * 60)
+          EOF
