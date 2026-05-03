@@ -1,6 +1,6 @@
 """
-VINYL ARBITRAGE SCANNER — Discogs Client v2
-Bugfix: parametri search corretti per ottenere risultati pertinenti.
+VINYL ARBITRAGE SCANNER — Discogs Client v3
+Bugfix: marketplace search restituisce "results", non "listings".
 """
 import time
 import requests
@@ -42,35 +42,45 @@ def _get(endpoint: str, params: dict = None) -> dict | None:
 
 
 def search_releases(query: str, page: int = 1) -> dict | None:
-    """
-    Cerca nel database Discogs.
-    IMPORTANTE: usa il parametro 'q' per full-text search,
-    con type=release e format=vinyl.
-    """
-    params = {
-        "q":        query,          # Query libera — campo principale
-        "type":     "release",      # Solo release (non master/label/artist)
-        "format":   "vinyl",        # Solo vinile
+    """Cerca nel database Discogs — restituisce chiave 'results'."""
+    return _get("/database/search", {
+        "q":        query,
+        "type":     "release",
+        "format":   "vinyl",
         "page":     page,
         "per_page": 10,
-    }
-    return _get("/database/search", params)
+    })
 
 
 def get_release_details(release_id: int) -> dict | None:
     return _get(f"/releases/{release_id}")
 
 
-def get_marketplace_listings(release_id: int) -> dict | None:
-    """Listing attivi sul marketplace per questa release, ordinati per prezzo."""
-    return _get("/marketplace/search", {
+def get_marketplace_listings(release_id: int) -> list:
+    """
+    Restituisce lista di listing attivi per questa release.
+    BUGFIX: l'endpoint /marketplace/search restituisce 'results' non 'listings'.
+    Ordina per prezzo crescente, filtra solo For Sale.
+    """
+    data = _get("/marketplace/search", {
         "release_id": release_id,
+        "status":     "For Sale",
         "sort":       "price",
         "sort_order": "asc",
-        "per_page":   10,
+        "per_page":   25,
     })
+    if not data:
+        return []
+
+    # Debug: mostra le chiavi restituite se non trova results
+    results = data.get("results") or data.get("listings") or []
+    if not results and data:
+        keys = list(data.keys())
+        print(f"      ↳ Marketplace response keys: {keys}")
+
+    return results
 
 
 def get_price_stats(release_id: int) -> dict | None:
-    """Suggerimenti prezzo ufficiali Discogs per condizione."""
+    """Prezzi suggeriti Discogs per condizione (mediana da vendite reali)."""
     return _get(f"/marketplace/price_suggestions/{release_id}")
