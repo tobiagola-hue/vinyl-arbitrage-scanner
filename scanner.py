@@ -1,6 +1,6 @@
 """
-VINYL ARBITRAGE SCANNER — scanner.py v3
-Bugfix: list index out of range, search params corretti, watchlist corretta.
+VINYL ARBITRAGE SCANNER — scanner.py v4
+Bugfix scorer, soglie abbassate, log debug dettagliato.
 """
 import time
 import traceback
@@ -24,6 +24,7 @@ from config import MIN_SCORE
 
 MAX_RESULTS_PER_QUERY   = 8
 MAX_LISTING_PER_RELEASE = 5
+MIN_WANTLIST            = 20   # Abbassato da 50
 
 
 def safe_get(d, *keys, default=None):
@@ -35,31 +36,33 @@ def safe_get(d, *keys, default=None):
 
 
 def get_artist_name(details: dict) -> str:
-    """Estrae nome artista in modo sicuro, gestisce lista vuota."""
     artists = details.get("artists") or []
-    if artists and isinstance(artists, list) and len(artists) > 0:
+    if artists and len(artists) > 0:
         return artists[0].get("name", "?")
-    # Fallback: prova dal titolo o dal campo extraartists
     title = details.get("title", "?")
     return title.split(" - ")[0] if " - " in title else "?"
 
 
 def get_label_name(details: dict) -> str:
-    """Estrae nome label in modo sicuro."""
     labels = details.get("labels") or []
-    if labels and isinstance(labels, list) and len(labels) > 0:
+    if labels and len(labels) > 0:
         return labels[0].get("name", "")
     return ""
 
 
+def extract_price(listing: dict) -> float:
+    """Estrae prezzo sia da dict {'value':X} che da numero diretto."""
+    price_data = listing.get("price") or 0
+    if isinstance(price_data, dict):
+        return float(price_data.get("value", 0) or 0)
+    return float(price_data or 0)
+
+
 def get_median(release_id: int, details: dict) -> float:
-    """Stima mediana senza chiamate extra quando possibile."""
     lp = safe_get(details, "lowest_price")
     community_have = safe_get(details, "community", "have", default=0) or 0
-
-    if lp and float(lp) > 0 and community_have > 5:
+    if lp and float(lp) > 0 and community_have > 3:
         return round(float(lp) * 1.4, 2)
-
     stats = dc.get_price_stats(release_id)
     if stats:
         for grade in ("Near Mint (NM or M-)", "Very Good Plus (VG+)", "Mint (M)"):
@@ -70,7 +73,6 @@ def get_median(release_id: int, details: dict) -> float:
 
 
 def analyze_release(release_id: int) -> int:
-    """Analizza una release. Ritorna 1 se trova e alerta un'opportunità."""
     try:
         details = dc.get_release_details(release_id)
         if not details:
@@ -85,25 +87,32 @@ def analyze_release(release_id: int) -> int:
         for_sale = details.get("num_for_sale", 0) or 0
         notes    = details.get("notes", "") or ""
 
-        if wantlist < 50:
+        if wantlist < MIN_WANTLIST:
+            print(f"      ↳ Skip: want={wantlist} < {MIN_WANTLIST}")
             return 0
 
         median = get_median(release_id, details)
         if median <= 0:
+            print(f"      ↳ Skip: mediana non disponibile")
             return 0
+
+        print(f"      ↳ want={wantlist} | mediana=€{median:.0f} | in vendita={for_sale}")
 
         listings_data = dc.get_marketplace_listings(release_id)
         if not listings_data:
+            print(f"      ↳ Nessun listing marketplace")
             return 0
 
         listings = (listings_data.get("listings") or [])[:MAX_LISTING_PER_RELEASE]
-        found = 0
+        if not listings:
+            print(f"      ↳ Lista listing vuota")
+            return 0
 
+        found = 0
         for listing in listings:
             listing_id = str(listing.get("id", ""))
-            condition  = safe_get(listing, "condition") or ""
-            price      = safe_get(listing, "price", "value") or 0
-            price      = float(price)
+            condition  = listing.get("condition", "") or ""
+            price      = extract_price(listing)
             seller     = listing.get("seller") or {}
             ships_from = listing.get("ships_from", "US") or "US"
             comments   = listing.get("comments", "") or ""
@@ -111,8 +120,10 @@ def analyze_release(release_id: int) -> int:
             if opportunity_exists(listing_id):
                 continue
 
-            ok, _ = passes_prefilter(listing, median)
+            # ── Prefilter con debug ──────────────────
+            ok, reason = passes_prefilter(listing, median)
             if not ok:
+                print(f"      ↳ Listing {listing_id} scartato: {reason}")
                 continue
 
             full_text   = f"{comments} {artist} {title} {label} {notes}".lower()
@@ -120,6 +131,7 @@ def analyze_release(release_id: int) -> int:
             flags       = find_red_flags(full_text)
 
             if flags and not rarity_sigs:
+                print(f"      ↳ Listing {listing_id} scartato: red flags senza rarità")
                 continue
 
             if detect_first_press_from_matrix(notes):
@@ -129,6 +141,7 @@ def analyze_release(release_id: int) -> int:
 
             profit_data = calc_profit(price, median, condition, ships_from)
             if profit_data["gross_profit"] <= 0:
+                print(f"      ↳ Listing {listing_id}: profitto negativo (€{profit_data['gross_profit']:.0f})")
                 continue
 
             opp = {
@@ -161,7 +174,7 @@ def analyze_release(release_id: int) -> int:
 
             print(
                 f"    💿 {artist} — {title} | "
-                f"€{price:.0f} vs mediana €{median:.0f} | "
+                f"€{price:.0f} vs €{median:.0f} | "
                 f"ROI {opp['roi']*100:.0f}% | Score {opp['score']}/10"
             )
 
@@ -175,17 +188,15 @@ def analyze_release(release_id: int) -> int:
         return found
 
     except Exception as e:
-        print(f"    ⚠️ Errore analisi release {release_id}: {e}")
+        print(f"    ⚠️ Errore release {release_id}: {e}")
         return 0
 
 
 def scan_query(query: str, name: str, tier: str) -> int:
-    """Cerca release per query e analizza le prime N."""
     print(f"\n🔎 [{tier}] {name}")
-
     results = dc.search_releases(query=query, page=1)
     if not results:
-        print(f"    Nessun risultato per: {query}")
+        print(f"    Nessun risultato")
         return 0
 
     releases = (results.get("results") or [])[:MAX_RESULTS_PER_QUERY]
@@ -207,32 +218,22 @@ def scan_query(query: str, name: str, tier: str) -> int:
 
 def main():
     print("=" * 55)
-    print("🎵 VINYL ARBITRAGE SCANNER v3 — Avvio")
+    print("🎵 VINYL ARBITRAGE SCANNER v4 — Avvio")
     print("=" * 55)
 
     init_db()
     send_startup_message()
 
     total_found = 0
-
     for tier in ("A", "B", "C"):
         entries = [e for e in WATCHLIST if e.get("tier") == tier]
         print(f"\n{'='*20} TIER {tier} — {len(entries)} ricerche {'='*20}")
-
         for entry in entries:
             try:
-                if entry.get("type") == "search":
-                    found = scan_query(
-                        query=entry["query"],
-                        name=entry["name"],
-                        tier=tier
-                    )
-                    total_found += found
-                else:
-                    print(f"  ⚠️ Tipo non supportato: {entry.get('type')}")
+                found = scan_query(entry["query"], entry["name"], tier)
+                total_found += found
             except Exception as e:
-                print(f"  ❌ Errore su {entry.get('name')}: {e}")
-                continue
+                print(f"  ❌ {entry.get('name')}: {e}")
             time.sleep(1)
 
     today   = get_today_stats()
@@ -257,6 +258,5 @@ if __name__ == "__main__":
     try:
         main()
     except Exception as e:
-        err = traceback.format_exc()
-        print(f"\n❌ ERRORE CRITICO:\n{err}")
+        print(f"\n❌ ERRORE CRITICO:\n{traceback.format_exc()}")
         send_error_alert(str(e))
