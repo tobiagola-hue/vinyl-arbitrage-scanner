@@ -1,6 +1,6 @@
 """
-VINYL ARBITRAGE SCANNER — Discogs Client
-Tutte le chiamate all'API Discogs con rate limiting automatico.
+VINYL ARBITRAGE SCANNER — Discogs Client v2
+Bugfix: parametri search corretti per ottenere risultati pertinenti.
 """
 import time
 import requests
@@ -19,7 +19,11 @@ def _get(endpoint: str, params: dict = None) -> dict | None:
     url = f"{DISCOGS_BASE_URL}{endpoint}"
     for attempt in range(MAX_RETRIES):
         try:
-            r = requests.get(url, headers=HEADERS, params=params or {}, timeout=REQUEST_TIMEOUT)
+            r = requests.get(
+                url, headers=HEADERS,
+                params=params or {},
+                timeout=REQUEST_TIMEOUT
+            )
             time.sleep(RATE_LIMIT_SLEEP)
             if r.status_code == 200:
                 return r.json()
@@ -29,52 +33,44 @@ def _get(endpoint: str, params: dict = None) -> dict | None:
             elif r.status_code == 404:
                 return None
             else:
-                print(f"  HTTP {r.status_code} su {url}")
+                print(f"  HTTP {r.status_code} su {endpoint}")
+                return None
         except requests.RequestException as e:
-            print(f"  Errore rete: {e} (tentativo {attempt+1}/{MAX_RETRIES})")
+            print(f"  Errore rete (tentativo {attempt+1}): {e}")
             time.sleep(3)
     return None
 
 
-def get_artist_releases(artist_id: int, page: int = 1, per_page: int = 50) -> dict | None:
-    return _get(f"/artists/{artist_id}/releases", {
-        "sort": "year", "sort_order": "desc",
-        "page": page, "per_page": per_page
-    })
-
-
-def get_master_versions(master_id: int, page: int = 1, per_page: int = 100) -> dict | None:
-    return _get(f"/masters/{master_id}/versions", {
-        "format": "Vinyl", "page": page, "per_page": per_page
-    })
+def search_releases(query: str, page: int = 1) -> dict | None:
+    """
+    Cerca nel database Discogs.
+    IMPORTANTE: usa il parametro 'q' per full-text search,
+    con type=release e format=vinyl.
+    """
+    params = {
+        "q":        query,          # Query libera — campo principale
+        "type":     "release",      # Solo release (non master/label/artist)
+        "format":   "vinyl",        # Solo vinile
+        "page":     page,
+        "per_page": 10,
+    }
+    return _get("/database/search", params)
 
 
 def get_release_details(release_id: int) -> dict | None:
     return _get(f"/releases/{release_id}")
 
 
-def get_marketplace_listings(release_id: int, condition: str = None) -> dict | None:
-    params = {"release_id": release_id, "sort": "price", "sort_order": "asc", "per_page": 50}
-    if condition:
-        params["condition"] = condition
-    return _get("/marketplace/search", params)
+def get_marketplace_listings(release_id: int) -> dict | None:
+    """Listing attivi sul marketplace per questa release, ordinati per prezzo."""
+    return _get("/marketplace/search", {
+        "release_id": release_id,
+        "sort":       "price",
+        "sort_order": "asc",
+        "per_page":   10,
+    })
 
 
 def get_price_stats(release_id: int) -> dict | None:
-    """Statistiche prezzi: mediana, min, max (solo per utenti autenticati)."""
+    """Suggerimenti prezzo ufficiali Discogs per condizione."""
     return _get(f"/marketplace/price_suggestions/{release_id}")
-
-
-def search_releases(query: str = None, artist: str = None,
-                    release_title: str = None, catno: str = None,
-                    page: int = 1) -> dict | None:
-    params = {"type": "release", "format": "vinyl", "page": page, "per_page": 25}
-    if query:       params["q"] = query
-    if artist:      params["artist"] = artist
-    if release_title: params["release_title"] = release_title
-    if catno:       params["catno"] = catno
-    return _get("/database/search", params)
-
-
-def get_label_releases(label_id: int, page: int = 1) -> dict | None:
-    return _get(f"/labels/{label_id}/releases", {"page": page, "per_page": 50})
