@@ -1,70 +1,64 @@
 """
-VINYL ARBITRAGE SCANNER — Watchlist v2
-Focus su: pressature rare, label di nicchia, generi cult.
-NON artisti mainstream famosi (troppa competizione, margini bassi).
-Strategia: cercare per GENERE + TIPO PRESSATURA + LABEL piccola.
+VINYL ARBITRAGE SCANNER — Watchlist v3
+Query semplificate: meno parole = più risultati Discogs.
 """
 
 WATCHLIST = [
 
-    # ── JAZZ ORIGINALE ANNI '50-'60 ─────────────────────
-    {"name": "Blue Note Original Press",    "type": "search", "query": "blue note original pressing 1950s 1960s", "tier": "A"},
-    {"name": "Prestige Records Original",   "type": "search", "query": "prestige records original pressing jazz vinyl", "tier": "A"},
-    {"name": "Impulse Records Original",    "type": "search", "query": "impulse records original pressing vinyl", "tier": "A"},
-    {"name": "Riverside Records Jazz",      "type": "search", "query": "riverside records original jazz pressing vinyl", "tier": "A"},
+    # ── TIER A — JAZZ ORIGINALE ──────────────────────────
+    {"name": "Blue Note Jazz Original",     "type": "search", "query": "blue note jazz original vinyl",         "tier": "A"},
+    {"name": "Prestige Jazz Original",      "type": "search", "query": "prestige jazz original pressing vinyl", "tier": "A"},
+    {"name": "Impulse Jazz Original",       "type": "search", "query": "impulse jazz original vinyl",           "tier": "A"},
+    {"name": "Riverside Jazz Original",     "type": "search", "query": "riverside jazz vinyl original",         "tier": "A"},
+    {"name": "Verve Jazz Original",         "type": "search", "query": "verve records jazz original pressing",  "tier": "A"},
+    {"name": "Atlantic Jazz Original",      "type": "search", "query": "atlantic records jazz original vinyl",  "tier": "A"},
 
-    # ── SOUL / FUNK ──────────────────────────────────────
-    {"name": "Northern Soul 45",            "type": "search", "query": "northern soul original 45 rpm rare", "tier": "A"},
-    {"name": "Funk Soul Small Label",       "type": "search", "query": "funk soul rare small label original 1960s 1970s", "tier": "A"},
-    {"name": "Motown Original",             "type": "search", "query": "motown tamla original pressing 1960s vinyl", "tier": "A"},
+    # ── TIER A — SOUL / FUNK ─────────────────────────────
+    {"name": "Northern Soul 45rpm",         "type": "search", "query": "northern soul 45 rpm original",        "tier": "A"},
+    {"name": "Funk Soul Original",          "type": "search", "query": "funk soul original pressing vinyl",     "tier": "A"},
+    {"name": "Motown Original",             "type": "search", "query": "motown original pressing vinyl",        "tier": "A"},
 
-    # ── KRAUTROCK / PROG TEDESCO ─────────────────────────
-    {"name": "Krautrock Original German",   "type": "search", "query": "krautrock original german pressing 1970s vinyl", "tier": "A"},
-    {"name": "Can Faust Neu Original",      "type": "search", "query": "can faust neu amon duul original pressing vinyl", "tier": "A"},
+    # ── TIER A — KRAUTROCK ───────────────────────────────
+    {"name": "Krautrock Original",          "type": "search", "query": "krautrock german original vinyl",       "tier": "A"},
+    {"name": "Kosmische Musik Original",    "type": "search", "query": "kosmische musik original pressing",     "tier": "A"},
 
-    # ── PSYCH / GARAGE '60s ──────────────────────────────
-    {"name": "Psych Garage 60s",            "type": "search", "query": "psychedelic garage original pressing 1966 1967 1968", "tier": "A"},
-    {"name": "UK Psych Original",           "type": "search", "query": "uk psychedelic original pressing vinyl 1967 1968 1969", "tier": "A"},
+    # ── TIER A — PSYCH GARAGE ────────────────────────────
+    {"name": "Psych Garage 60s Original",   "type": "search", "query": "psychedelic garage original vinyl",    "tier": "A"},
+    {"name": "UK Psych Original",           "type": "search", "query": "uk psychedelic original pressing",     "tier": "A"},
 
-    # ── LIBRARY MUSIC ────────────────────────────────────
-    {"name": "Library Music Rare",          "type": "search", "query": "library music original pressing vinyl rare", "tier": "B"},
-    {"name": "Jazz Fusion Rare",            "type": "search", "query": "jazz fusion rare original pressing 1970s vinyl", "tier": "B"},
+    # ── TIER A — PRESSATURE SPECIALI ─────────────────────
+    {"name": "Test Pressing Rare",          "type": "search", "query": "test pressing vinyl rare",             "tier": "A"},
+    {"name": "White Label Promo",           "type": "search", "query": "white label promo vinyl",              "tier": "A"},
 
-    # ── PRESSATURE GIAPPONESI CON OBI ───────────────────
-    {"name": "Japan OBI Jazz",              "type": "search", "query": "japan obi strip jazz vinyl", "tier": "B"},
-    {"name": "Japan OBI Rock",              "type": "search", "query": "japan obi strip rock vinyl original", "tier": "B"},
+    # ── TIER B — GIAPPONE ────────────────────────────────
+    {"name": "Japan OBI Jazz",              "type": "search", "query": "japan obi jazz vinyl",                 "tier": "B"},
+    {"name": "Japan OBI Rock",              "type": "search", "query": "japan obi rock vinyl",                 "tier": "B"},
+    {"name": "Japan OBI Soul",              "type": "search", "query": "japan obi soul funk vinyl",            "tier": "B"},
 
-    # ── ELETTRONICA ANNI '70-'90 ─────────────────────────
-    {"name": "Electronic Ambient 70s-80s",  "type": "search", "query": "electronic ambient original pressing vinyl 1970s 1980s", "tier": "B"},
-    {"name": "Early Techno House 88-91",    "type": "search", "query": "early techno house original pressing 1988 1989 1990 1991", "tier": "B"},
+    # ── TIER B — LIBRARY MUSIC ───────────────────────────
+    {"name": "Library Music Original",      "type": "search", "query": "library music vinyl rare",             "tier": "B"},
+    {"name": "Jazz Fusion Original",        "type": "search", "query": "jazz fusion original pressing vinyl",  "tier": "B"},
 
-    # ── FOLK / PSYCH-FOLK ────────────────────────────────
-    {"name": "Folk Psych Original",         "type": "search", "query": "folk psych original pressing vinyl 1968 1969 1970 1971", "tier": "B"},
+    # ── TIER B — ELETTRONICA ─────────────────────────────
+    {"name": "Electronic Ambient Original", "type": "search", "query": "electronic ambient original vinyl",    "tier": "B"},
+    {"name": "Early Techno House Original", "type": "search", "query": "techno house original pressing vinyl", "tier": "B"},
 
-    # ── REGGAE / DUB ORIGINALE ───────────────────────────
-    {"name": "Reggae Dub Jamaica Original", "type": "search", "query": "reggae dub original jamaican pressing vinyl studio one", "tier": "B"},
+    # ── TIER B — ALTRI GENERI ────────────────────────────
+    {"name": "Folk Psych Original",         "type": "search", "query": "folk psych original vinyl",            "tier": "B"},
+    {"name": "Reggae Dub Jamaica",          "type": "search", "query": "reggae dub jamaica original vinyl",    "tier": "B"},
+    {"name": "Bossa Nova Latin Original",   "type": "search", "query": "bossa nova latin original vinyl",      "tier": "B"},
+    {"name": "Hip Hop Original 88-93",      "type": "search", "query": "hip hop original pressing vinyl",      "tier": "B"},
 
-    # ── LATIN / BOSSA NOVA ───────────────────────────────
-    {"name": "Bossa Nova Latin Original",   "type": "search", "query": "bossa nova latin original pressing vinyl 1960s rare", "tier": "B"},
+    # ── TIER B — COLORED / LIMITED ───────────────────────
+    {"name": "Colored Vinyl Limited",       "type": "search", "query": "colored vinyl limited original",       "tier": "B"},
+    {"name": "Picture Disc Original",       "type": "search", "query": "picture disc original vinyl",          "tier": "B"},
 
-    # ── TIPO PRESSATURA SPECIALE ─────────────────────────
-    {"name": "Test Press Acetate",          "type": "search", "query": "test pressing acetate vinyl rare", "tier": "A"},
-    {"name": "White Label Promo",           "type": "search", "query": "white label promo original vinyl not for sale", "tier": "A"},
-    {"name": "Colored Vinyl Limited",       "type": "search", "query": "colored vinyl limited edition original rare", "tier": "B"},
-
-    # ── HIP HOP ORIGINALE '88-'93 ────────────────────────
-    {"name": "Hip Hop Original 88-93",      "type": "search", "query": "hip hop original pressing vinyl 1988 1989 1990 1991 1992 1993", "tier": "B"},
-
-    # ── POST-PUNK / COLD WAVE ────────────────────────────
-    {"name": "Post Punk Cold Wave 79-82",   "type": "search", "query": "post punk cold wave original pressing 1979 1980 1981 1982", "tier": "C"},
-
-    # ── PROG ROCK ORIGINALE ──────────────────────────────
-    {"name": "Prog Rock Original 70s",      "type": "search", "query": "progressive rock original pressing vinyl 1970 1971 1972 1973", "tier": "C"},
+    # ── TIER C ───────────────────────────────────────────
+    {"name": "Post Punk Original",          "type": "search", "query": "post punk original pressing vinyl",    "tier": "C"},
+    {"name": "Prog Rock Original",          "type": "search", "query": "progressive rock original vinyl",      "tier": "C"},
+    {"name": "Ambient Drone Original",      "type": "search", "query": "ambient drone original pressing",      "tier": "C"},
 ]
 
-# ─────────────────────────────────────────────
-# KEYWORDS RARITÀ
-# ─────────────────────────────────────────────
 RARITY_KEYWORDS = [
     "first press", "first pressing", "1st press", "1st pressing",
     "original press", "original pressing", "original uk", "original us",
@@ -82,9 +76,6 @@ RARITY_KEYWORDS = [
     "matrix", "dead wax", "runout",
 ]
 
-# ─────────────────────────────────────────────
-# RED FLAGS: ristampe moderne
-# ─────────────────────────────────────────────
 RED_FLAGS = [
     "music on vinyl", "back to black", "vinyl me please",
     "rhino records", "demon records", "culture factory",
@@ -96,9 +87,6 @@ RED_FLAGS = [
     "lacquer cut from digital",
 ]
 
-# ─────────────────────────────────────────────
-# MOLTIPLICATORI PAESE
-# ─────────────────────────────────────────────
 COUNTRY_VALUE_MULTIPLIERS = {
     "Japan":       1.50,
     "UK":          1.30,
