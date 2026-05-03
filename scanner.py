@@ -1,6 +1,6 @@
 """
-VINYL ARBITRAGE SCANNER — scanner.py v4
-Bugfix scorer, soglie abbassate, log debug dettagliato.
+VINYL ARBITRAGE SCANNER — scanner.py v5
+Bugfix: marketplace restituisce lista diretta, non dict con 'listings'.
 """
 import time
 import traceback
@@ -24,7 +24,7 @@ from config import MIN_SCORE
 
 MAX_RESULTS_PER_QUERY   = 8
 MAX_LISTING_PER_RELEASE = 5
-MIN_WANTLIST            = 20   # Abbassato da 50
+MIN_WANTLIST            = 20
 
 
 def safe_get(d, *keys, default=None):
@@ -45,23 +45,21 @@ def get_artist_name(details: dict) -> str:
 
 def get_label_name(details: dict) -> str:
     labels = details.get("labels") or []
-    if labels and len(labels) > 0:
-        return labels[0].get("name", "")
-    return ""
+    return labels[0].get("name", "") if labels else ""
 
 
 def extract_price(listing: dict) -> float:
-    """Estrae prezzo sia da dict {'value':X} che da numero diretto."""
-    price_data = listing.get("price") or 0
-    if isinstance(price_data, dict):
-        return float(price_data.get("value", 0) or 0)
-    return float(price_data or 0)
+    """Supporta sia price={'value':X} che price=X numerico."""
+    p = listing.get("price") or 0
+    if isinstance(p, dict):
+        return float(p.get("value", 0) or 0)
+    return float(p or 0)
 
 
 def get_median(release_id: int, details: dict) -> float:
     lp = safe_get(details, "lowest_price")
-    community_have = safe_get(details, "community", "have", default=0) or 0
-    if lp and float(lp) > 0 and community_have > 3:
+    have = safe_get(details, "community", "have", default=0) or 0
+    if lp and float(lp) > 0 and have > 3:
         return round(float(lp) * 1.4, 2)
     stats = dc.get_price_stats(release_id)
     if stats:
@@ -98,18 +96,17 @@ def analyze_release(release_id: int) -> int:
 
         print(f"      ↳ want={wantlist} | mediana=€{median:.0f} | in vendita={for_sale}")
 
-        listings_data = dc.get_marketplace_listings(release_id)
-        if not listings_data:
+        # ── Marketplace listings — ora restituisce lista diretta ──
+        listings = dc.get_marketplace_listings(release_id)
+
+        if not listings:
             print(f"      ↳ Nessun listing marketplace")
             return 0
 
-        listings = (listings_data.get("listings") or [])[:MAX_LISTING_PER_RELEASE]
-        if not listings:
-            print(f"      ↳ Lista listing vuota")
-            return 0
-
+        print(f"      ↳ {len(listings)} listing trovati")
         found = 0
-        for listing in listings:
+
+        for listing in listings[:MAX_LISTING_PER_RELEASE]:
             listing_id = str(listing.get("id", ""))
             condition  = listing.get("condition", "") or ""
             price      = extract_price(listing)
@@ -117,13 +114,12 @@ def analyze_release(release_id: int) -> int:
             ships_from = listing.get("ships_from", "US") or "US"
             comments   = listing.get("comments", "") or ""
 
-            if opportunity_exists(listing_id):
+            if not listing_id or opportunity_exists(listing_id):
                 continue
 
-            # ── Prefilter con debug ──────────────────
             ok, reason = passes_prefilter(listing, median)
             if not ok:
-                print(f"      ↳ Listing {listing_id} scartato: {reason}")
+                print(f"        ↳ [{listing_id}] scartato: {reason}")
                 continue
 
             full_text   = f"{comments} {artist} {title} {label} {notes}".lower()
@@ -131,7 +127,7 @@ def analyze_release(release_id: int) -> int:
             flags       = find_red_flags(full_text)
 
             if flags and not rarity_sigs:
-                print(f"      ↳ Listing {listing_id} scartato: red flags senza rarità")
+                print(f"        ↳ [{listing_id}] scartato: red flags senza rarità")
                 continue
 
             if detect_first_press_from_matrix(notes):
@@ -141,7 +137,7 @@ def analyze_release(release_id: int) -> int:
 
             profit_data = calc_profit(price, median, condition, ships_from)
             if profit_data["gross_profit"] <= 0:
-                print(f"      ↳ Listing {listing_id}: profitto negativo (€{profit_data['gross_profit']:.0f})")
+                print(f"        ↳ [{listing_id}] profitto negativo €{profit_data['gross_profit']:.0f}")
                 continue
 
             opp = {
@@ -218,7 +214,7 @@ def scan_query(query: str, name: str, tier: str) -> int:
 
 def main():
     print("=" * 55)
-    print("🎵 VINYL ARBITRAGE SCANNER v4 — Avvio")
+    print("🎵 VINYL ARBITRAGE SCANNER v5 — Avvio")
     print("=" * 55)
 
     init_db()
