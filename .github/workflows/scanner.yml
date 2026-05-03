@@ -1,61 +1,53 @@
 name: Vinyl Arbitrage Scanner
 
 on:
-  # ── Esegue ogni 3 ore ──────────────────────
   schedule:
-    - cron: "0 * * * *"
-
-  # ── Esecuzione manuale dal tab Actions ─────
-  workflow_dispatch:
+    - cron: "0 * * * *"   # Ogni ora
+  workflow_dispatch:        # Avvio manuale
 
 jobs:
   scan:
     runs-on: ubuntu-latest
-    timeout-minutes: 50
+    timeout-minutes: 25
 
     steps:
-      # 1. Scarica il codice
-      - name: Checkout repository
+      - name: Checkout
         uses: actions/checkout@v4
 
-      # 2. Installa Python 3.11
-      - name: Set up Python
+      - name: Setup Python 3.11
         uses: actions/setup-python@v5
         with:
           python-version: "3.11"
 
-      # 3. Cache delle dipendenze per velocizzare i run
       - name: Cache pip
         uses: actions/cache@v4
         with:
           path: ~/.cache/pip
           key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
-          restore-keys: |
-            ${{ runner.os }}-pip-
+          restore-keys: ${{ runner.os }}-pip-
 
-      # 4. Installa le librerie Python
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      # 5. Ripristina il database SQLite dal run precedente
-      #    (GitHub Actions non ha storage persistente, usiamo cache)
-      - name: Restore database cache
+      - name: Restore database
         uses: actions/cache@v4
         with:
           path: vinyl_arbitrage.db
           key: vinyl-db-${{ github.run_id }}
           restore-keys: vinyl-db-
 
-      # 6. Esegue lo scanner
       - name: Run scanner
         env:
-          DISCOGS_TOKEN:      ${{ secrets.DISCOGS_TOKEN }}
-          TELEGRAM_BOT_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
-          TELEGRAM_CHAT_ID:   ${{ secrets.TELEGRAM_CHAT_ID }}
+          DISCOGS_TOKEN:           ${{ secrets.DISCOGS_TOKEN }}
+          DISCOGS_CONSUMER_KEY:    ${{ secrets.DISCOGS_CONSUMER_KEY }}
+          DISCOGS_CONSUMER_SECRET: ${{ secrets.DISCOGS_CONSUMER_SECRET }}
+          DISCOGS_ACCESS_TOKEN:    ${{ secrets.DISCOGS_ACCESS_TOKEN }}
+          DISCOGS_ACCESS_SECRET:   ${{ secrets.DISCOGS_ACCESS_SECRET }}
+          TELEGRAM_BOT_TOKEN:      ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TELEGRAM_CHAT_ID:        ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python scanner.py
 
-      # 7. Salva il database aggiornato per il prossimo run
-      - name: Save database cache
+      - name: Save database
         if: always()
         uses: actions/cache@v4
         with:
