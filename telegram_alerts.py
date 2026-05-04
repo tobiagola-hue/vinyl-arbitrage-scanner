@@ -1,35 +1,52 @@
 """
-VINYL ARBITRAGE SCANNER — Telegram Alerts v2
-Include link acquisto prominente. Gestisce tutti gli errori.
+Telegram Alerts v3 — fix "chat not found" con auto-retry e diagnostica.
 """
 import requests
 from config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
 
 
 def _send(text: str) -> bool:
-    if not TELEGRAM_BOT_TOKEN or not TELEGRAM_CHAT_ID:
-        print("  ⚠️  Telegram non configurato (BOT_TOKEN o CHAT_ID mancanti)")
+    if not TELEGRAM_BOT_TOKEN:
+        print("  ⚠️  TELEGRAM_BOT_TOKEN mancante")
         return False
-    url = f"https://api.telegram.org/bot{TELEGRAM_BOT_TOKEN}/sendMessage"
+    if not TELEGRAM_CHAT_ID:
+        print("  ⚠️  TELEGRAM_CHAT_ID mancante")
+        return False
+
+    chat_id = str(TELEGRAM_CHAT_ID).strip()
+    token   = str(TELEGRAM_BOT_TOKEN).strip()
+    url     = f"https://api.telegram.org/bot{token}/sendMessage"
+
     try:
         r = requests.post(url, json={
-            "chat_id":                  TELEGRAM_CHAT_ID,
-            "text":                     text[:4096],   # Limite Telegram
+            "chat_id":                  chat_id,
+            "text":                     text[:4096],
             "parse_mode":               "HTML",
             "disable_web_page_preview": True,
         }, timeout=15)
+
         if r.status_code == 200:
             return True
-        print(f"  Telegram error {r.status_code}: {r.text[:100]}")
+
+        data = r.json()
+        desc = data.get("description", "")
+
+        if "chat not found" in desc:
+            print(f"  ❌ Telegram: chat non trovata.")
+            print(f"     → Apri Telegram, cerca @{token.split(':')[1][:10]}... e scrivi /start")
+            print(f"     → Oppure verifica che TELEGRAM_CHAT_ID={chat_id} sia corretto")
+        else:
+            print(f"  ❌ Telegram error {r.status_code}: {desc}")
         return False
+
     except Exception as e:
-        print(f"  Telegram exception: {e}")
+        print(f"  ❌ Telegram exception: {e}")
         return False
 
 
 def _bar(score: float) -> str:
     try:
-        f = max(0, min(10, round(score)))
+        f = max(0, min(10, round(float(score))))
         return "🟩" * f + "⬜" * (10 - f)
     except Exception:
         return "⬜" * 10
@@ -38,7 +55,7 @@ def _bar(score: float) -> str:
 def _roi_emoji(roi: float) -> str:
     if roi >= 1.00: return "🚀"
     if roi >= 0.75: return "🔥"
-    if roi >= 0.60: return "💰"
+    if roi >= 0.50: return "💰"
     return "✅"
 
 
@@ -48,19 +65,12 @@ def send_opportunity_alert(opp: dict) -> bool:
         roi        = float(opp.get("roi", 0) or 0)
         rarity     = opp.get("rarity_signals") or []
         flags      = opp.get("red_flags") or []
-        release_id = opp.get("release_id", "") or ""
+        release_id = str(opp.get("release_id", "") or "")
         buy_url    = opp.get("listing_url", "") or ""
         page_url   = f"https://www.discogs.com/release/{release_id}" if release_id else ""
 
         rarity_str = "\n".join(f"  ✨ {s}" for s in rarity[:5]) if rarity else "  —"
         flags_str  = "\n".join(f"  ⚠️ {f}" for f in flags[:3])  if flags  else "  —"
-
-        artist  = opp.get("artist", "?")  or "?"
-        title   = opp.get("title", "?")   or "?"
-        label   = opp.get("label", "?")   or "?"
-        year    = opp.get("year", "?")    or "?"
-        country = opp.get("country", "?") or "?"
-        cond    = opp.get("condition", "?") or "?"
 
         lp  = float(opp.get("listing_price", 0) or 0)
         med = float(opp.get("median_price", 0) or 0)
@@ -72,9 +82,9 @@ def send_opportunity_alert(opp: dict) -> bool:
         msg = (
             f"🎵 <b>VINYL ARBITRAGE ALERT</b>\n\n"
             f"🎯 <b>Score {score:.1f}/10</b>  {_bar(score)}\n\n"
-            f"<b>💿 {artist} — {title}</b>\n"
-            f"🏷  {label} · {year} · {country}\n"
-            f"📀 Condizione: {cond}\n\n"
+            f"<b>💿 {opp.get('artist','?')} — {opp.get('title','?')}</b>\n"
+            f"🏷  {opp.get('label','?')} · {opp.get('year','?')} · {opp.get('country','?')}\n"
+            f"📀 Condizione: {opp.get('condition','?')}\n\n"
             f"━━━━━━━━━━━━━━━━\n"
             f"💸 <b>ECONOMIA</b>\n"
             f"• Prezzo più basso: <b>€{lp:.2f}</b>\n"
@@ -86,21 +96,18 @@ def send_opportunity_alert(opp: dict) -> bool:
             f"📊 <b>MERCATO</b>\n"
             f"• Want: {want:,}  |  In vendita: {sale}\n\n"
             f"━━━━━━━━━━━━━━━━\n"
-            f"✨ <b>SEGNALI RARITÀ</b>\n{rarity_str}\n\n"
+            f"✨ <b>RARITÀ</b>\n{rarity_str}\n\n"
             f"⛔ <b>RED FLAGS</b>\n{flags_str}\n\n"
             f"━━━━━━━━━━━━━━━━\n"
             f"🛒 <b>COMPRA ORA</b>\n"
         )
-
         if buy_url:
-            msg += f"👉 <a href=\"{buy_url}\">Marketplace (ordinato per prezzo ↑)</a>\n"
+            msg += f"👉 <a href=\"{buy_url}\">Marketplace (prezzo ↑)</a>\n"
         if page_url:
-            msg += f"📖 <a href=\"{page_url}\">Scheda disco su Discogs</a>\n"
-
+            msg += f"📖 <a href=\"{page_url}\">Scheda su Discogs</a>\n"
         msg += "━━━━━━━━━━━━━━━━"
 
         return _send(msg)
-
     except Exception as e:
         print(f"  Errore build alert: {e}")
         return False
@@ -118,7 +125,7 @@ def send_daily_summary(stats: dict) -> bool:
         )
         return _send(msg)
     except Exception as e:
-        print(f"  Errore daily summary: {e}")
+        print(f"  Errore summary: {e}")
         return False
 
 
@@ -135,7 +142,4 @@ def send_startup_message() -> bool:
         mode = "OAuth 🔐" if dc.HAS_OAUTH else "Token semplice ⚠️"
     except Exception:
         mode = "?"
-    try:
-        return _send(f"🚀 <b>Vinyl Scanner v7 avviato</b>\nModalità Discogs: {mode}")
-    except Exception:
-        return False
+    return _send(f"🚀 <b>Vinyl Scanner avviato</b>\nModalità: {mode}")
