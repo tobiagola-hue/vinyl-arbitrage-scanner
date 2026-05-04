@@ -1,32 +1,26 @@
-"""
-VINYL ARBITRAGE SCANNER — Config v2
-"""
 import os
 
 # ── API KEYS ──────────────────────────────────────────
-# OAuth (preferito — sblocca tutti gli endpoint)
 DISCOGS_CONSUMER_KEY    = os.getenv("DISCOGS_CONSUMER_KEY", "")
 DISCOGS_CONSUMER_SECRET = os.getenv("DISCOGS_CONSUMER_SECRET", "")
 DISCOGS_ACCESS_TOKEN    = os.getenv("DISCOGS_ACCESS_TOKEN", "")
 DISCOGS_ACCESS_SECRET   = os.getenv("DISCOGS_ACCESS_SECRET", "")
-# Token semplice (fallback)
 DISCOGS_TOKEN           = os.getenv("DISCOGS_TOKEN", "")
+TELEGRAM_BOT_TOKEN      = os.getenv("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_CHAT_ID        = os.getenv("TELEGRAM_CHAT_ID", "")
 
-TELEGRAM_BOT_TOKEN  = os.getenv("TELEGRAM_BOT_TOKEN", "")
-TELEGRAM_CHAT_ID    = os.getenv("TELEGRAM_CHAT_ID", "")
-
-# ── SOGLIE DI BUSINESS ───────────────────────────────
-MIN_ROI          = 0.40     # ROI minimo 40%
-MIN_PROFIT_EUR   = 15.0     # Profitto netto minimo €
-MIN_SCORE        = 6.5      # Score minimo per alert (1-10)
-MAX_PRICE_RATIO  = 0.65     # Compra solo se prezzo <= 65% mediana
-MIN_MEDIAN_EUR   = 15.0     # Ignora release con mediana < €15
+# ── SOGLIE ABBASSATE per ricevere alert ───────────────
+MIN_ROI          = 0.30     # ROI minimo 30%
+MIN_PROFIT_EUR   = 8.0      # Profitto netto minimo €
+MIN_SCORE        = 4.0      # Score minimo alert (abbassato per testare)
+MAX_PRICE_RATIO  = 0.70     # Compra se prezzo <= 70% mediana
+MIN_MEDIAN_EUR   = 15.0     # Ignora mediane < €15
 
 # ── SELLER ───────────────────────────────────────────
 MIN_SELLER_RATING   = 97.0
 MIN_SELLER_REVIEWS  = 5
 
-# ── FEE PIATTAFORME ──────────────────────────────────
+# ── FEE ──────────────────────────────────────────────
 DISCOGS_FEE  = 0.11
 EBAY_FEE     = 0.145
 
@@ -53,7 +47,5 @@ MAX_RETRIES         = 3
 
 # ── DATABASE ─────────────────────────────────────────
 DB_PATH = "vinyl_arbitrage.db"
-
-# ── SCAN SETTINGS ────────────────────────────────────
-MAX_RELEASES_PER_ARTIST = 30
+MAX_RELEASES_PER_ARTIST  = 30
 MAX_LISTINGS_PER_RELEASE = 10
