@@ -151,7 +151,8 @@ def analyze_release(release_id: int) -> int:
             print(f"      ↳ Skip: ratio {ratio:.0%} > {MAX_PRICE_RATIO:.0%}")
             return 0
 
-        opp_id = f"release_{release_id}"
+        from datetime import date as _date
+        opp_id = f"release_{release_id}_{_date.today().isoformat()}"
         if opportunity_exists(opp_id):
             return 0
 
