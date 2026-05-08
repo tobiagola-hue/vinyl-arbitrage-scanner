@@ -2,40 +2,30 @@ name: Vinyl Arbitrage Scanner
 
 on:
   schedule:
-    - cron: "0 * * * *"   # Ogni ora
-  workflow_dispatch:        # Avvio manuale
+    - cron: "0 * * * *"   # Ogni ora (24 run al giorno)
+  workflow_dispatch:
 
 jobs:
   scan:
     runs-on: ubuntu-latest
     timeout-minutes: 25
-
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup Python 3.11
-        uses: actions/setup-python@v5
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
         with:
           python-version: "3.11"
-
-      - name: Cache pip
-        uses: actions/cache@v4
+      - uses: actions/cache@v4
         with:
           path: ~/.cache/pip
           key: ${{ runner.os }}-pip-${{ hashFiles('requirements.txt') }}
           restore-keys: ${{ runner.os }}-pip-
-
       - name: Install dependencies
         run: pip install -r requirements.txt
-
-      - name: Restore database
-        uses: actions/cache@v4
+      - uses: actions/cache@v4
         with:
           path: vinyl_arbitrage.db
           key: vinyl-db-${{ github.run_id }}
           restore-keys: vinyl-db-
-
       - name: Run scanner
         env:
           DISCOGS_TOKEN:           ${{ secrets.DISCOGS_TOKEN }}
@@ -46,7 +36,6 @@ jobs:
           TELEGRAM_BOT_TOKEN:      ${{ secrets.TELEGRAM_BOT_TOKEN }}
           TELEGRAM_CHAT_ID:        ${{ secrets.TELEGRAM_CHAT_ID }}
         run: python scanner.py
-
       - name: Save database
         if: always()
         uses: actions/cache@v4
