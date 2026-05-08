@@ -1,6 +1,6 @@
 """
-VINYL ARBITRAGE SCANNER — Database
-SQLite per tracciare opportunità, acquisti e vendite.
+VINYL ARBITRAGE SCANNER — Database v2
+Aggiunto supporto per mode (expensive/midvalue) e recap giornaliero.
 """
 import sqlite3
 import json
@@ -15,16 +15,14 @@ def get_conn():
 
 
 def init_db():
-    """Crea le tabelle se non esistono."""
     conn = get_conn()
     c = conn.cursor()
-
-    # ── Opportunità trovate dallo scanner ──────────────
     c.execute("""
         CREATE TABLE IF NOT EXISTS opportunities (
             id               INTEGER PRIMARY KEY AUTOINCREMENT,
             listing_id       TEXT    UNIQUE,
             source           TEXT    DEFAULT 'discogs',
+            mode             TEXT    DEFAULT 'expensive',
             release_id       TEXT,
             artist           TEXT,
             title            TEXT,
@@ -38,22 +36,20 @@ def init_db():
             gross_profit     REAL,
             roi              REAL,
             score            REAL,
-            rarity_signals   TEXT,   -- JSON array
-            red_flags        TEXT,   -- JSON array
+            rarity_signals   TEXT,
+            red_flags        TEXT,
             wantlist_count   INTEGER DEFAULT 0,
             num_for_sale     INTEGER DEFAULT 0,
             seller_username  TEXT,
             seller_rating    REAL,
             seller_reviews   INTEGER,
             listing_url      TEXT,
-            cover_image      TEXT,
+            release_url      TEXT,
             alerted          INTEGER DEFAULT 0,
             created_at       TEXT,
             notes            TEXT
         )
     """)
-
-    # ── Acquisti effettuati ─────────────────────────────
     c.execute("""
         CREATE TABLE IF NOT EXISTS purchases (
             id                INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -67,8 +63,6 @@ def init_db():
             FOREIGN KEY(opportunity_id) REFERENCES opportunities(id)
         )
     """)
-
-    # ── Vendite effettuate ──────────────────────────────
     c.execute("""
         CREATE TABLE IF NOT EXISTS sales (
             id             INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -83,7 +77,6 @@ def init_db():
             FOREIGN KEY(purchase_id) REFERENCES purchases(id)
         )
     """)
-
     conn.commit()
     conn.close()
 
@@ -102,17 +95,18 @@ def save_opportunity(opp: dict):
     try:
         conn.execute("""
             INSERT OR IGNORE INTO opportunities (
-                listing_id, source, release_id, artist, title, label,
+                listing_id, source, mode, release_id, artist, title, label,
                 year, country, condition, listing_price, median_price,
                 est_sell_price, gross_profit, roi, score,
                 rarity_signals, red_flags,
                 wantlist_count, num_for_sale,
                 seller_username, seller_rating, seller_reviews,
-                listing_url, cover_image, created_at
-            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
+                listing_url, release_url, created_at
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)
         """, (
             opp["listing_id"],
             opp.get("source", "discogs"),
+            opp.get("mode", "expensive"),
             opp.get("release_id", ""),
             opp.get("artist", ""),
             opp.get("title", ""),
@@ -134,7 +128,7 @@ def save_opportunity(opp: dict):
             opp.get("seller_rating", 0),
             opp.get("seller_reviews", 0),
             opp.get("listing_url", ""),
-            opp.get("cover_image", ""),
+            opp.get("release_url", ""),
             datetime.now().isoformat(),
         ))
         conn.commit()
@@ -145,8 +139,7 @@ def save_opportunity(opp: dict):
 def mark_alerted(listing_id: str):
     conn = get_conn()
     conn.execute(
-        "UPDATE opportunities SET alerted = 1 WHERE listing_id = ?",
-        (listing_id,)
+        "UPDATE opportunities SET alerted = 1 WHERE listing_id = ?", (listing_id,)
     )
     conn.commit()
     conn.close()
@@ -156,8 +149,7 @@ def get_today_stats() -> dict:
     today = date.today().isoformat()
     conn = get_conn()
     found = conn.execute(
-        "SELECT COUNT(*) FROM opportunities WHERE created_at LIKE ?",
-        (f"{today}%",)
+        "SELECT COUNT(*) FROM opportunities WHERE created_at LIKE ?", (f"{today}%",)
     ).fetchone()[0]
     alerted = conn.execute(
         "SELECT COUNT(*) FROM opportunities WHERE alerted=1 AND created_at LIKE ?",
@@ -172,9 +164,7 @@ def get_all_time_stats() -> dict:
     total_alerted = conn.execute(
         "SELECT COUNT(*) FROM opportunities WHERE alerted=1"
     ).fetchone()[0]
-    total_purchases = conn.execute(
-        "SELECT COUNT(*) FROM purchases"
-    ).fetchone()[0]
+    total_purchases = conn.execute("SELECT COUNT(*) FROM purchases").fetchone()[0]
     total_profit = conn.execute(
         "SELECT COALESCE(SUM(net_profit), 0) FROM sales"
     ).fetchone()[0]
@@ -186,28 +176,37 @@ def get_all_time_stats() -> dict:
     }
 
 
-def log_purchase(opportunity_id: int, purchase_price: float,
-                 condition_received: str, platform: str,
-                 shipping_in: float, notes: str = ""):
-    """Chiama questo quando acquisti un disco trovato dal bot."""
+def get_top_opportunities(mode: str, limit: int = 10, days: int = 1) -> list:
+    """Ritorna le migliori opportunità delle ultime N ore per il recap."""
+    conn = get_conn()
+    rows = conn.execute("""
+        SELECT artist, title, listing_price, median_price, gross_profit,
+               roi, score, listing_url, release_url, wantlist_count
+        FROM opportunities
+        WHERE mode = ?
+          AND created_at >= datetime('now', ?)
+        ORDER BY score DESC, roi DESC
+        LIMIT ?
+    """, (mode, f"-{days} days", limit)).fetchall()
+    conn.close()
+    return [dict(r) for r in rows]
+
+
+def log_purchase(opportunity_id, purchase_price, condition_received,
+                 platform, shipping_in, notes=""):
     conn = get_conn()
     conn.execute("""
         INSERT INTO purchases
         (opportunity_id, purchase_price, purchase_date, condition_received,
          platform_bought, shipping_paid_in, notes)
         VALUES (?,?,?,?,?,?,?)
-    """, (
-        opportunity_id, purchase_price,
-        datetime.now().isoformat(), condition_received,
-        platform, shipping_in, notes
-    ))
+    """, (opportunity_id, purchase_price, datetime.now().isoformat(),
+          condition_received, platform, shipping_in, notes))
     conn.commit()
     conn.close()
 
 
-def log_sale(purchase_id: int, sale_price: float, platform: str,
-             fees_paid: float, shipping_paid: float, notes: str = ""):
-    """Chiama questo quando vendi un disco acquistato."""
+def log_sale(purchase_id, sale_price, platform, fees_paid, shipping_paid, notes=""):
     net = sale_price - fees_paid - shipping_paid
     conn = get_conn()
     conn.execute("""
@@ -215,11 +214,8 @@ def log_sale(purchase_id: int, sale_price: float, platform: str,
         (purchase_id, sale_price, sale_date, platform_sold,
          fees_paid, shipping_paid, net_profit, notes)
         VALUES (?,?,?,?,?,?,?,?)
-    """, (
-        purchase_id, sale_price,
-        datetime.now().isoformat(), platform,
-        fees_paid, shipping_paid, net, notes
-    ))
+    """, (purchase_id, sale_price, datetime.now().isoformat(),
+          platform, fees_paid, shipping_paid, net, notes))
     conn.commit()
     conn.close()
     return net
