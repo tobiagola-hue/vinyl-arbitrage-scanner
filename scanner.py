@@ -30,8 +30,8 @@ FALLBACK_MULT = 1.8
 
 # Soglie per modalita
 CFG = {
-    "expensive": {"min_want": 30, "min_median": 40.0},
-    "midvalue":  {"min_want": 15, "min_median": 18.0},
+    "expensive": {"min_want": 20, "min_median": 70.0},
+    "midvalue":  {"min_want": 15, "min_median": 45.0},
 }
 
 
