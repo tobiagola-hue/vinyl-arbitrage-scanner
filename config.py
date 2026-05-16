@@ -11,23 +11,23 @@ DISCOGS_TOKEN           = os.getenv("DISCOGS_TOKEN", "")
 TELEGRAM_BOT_TOKEN = os.getenv("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID   = os.getenv("TELEGRAM_CHAT_ID", "")
 
-# EBAY (App ID da developer.ebay.com)
+# EBAY
 EBAY_APP_ID = os.getenv("EBAY_APP_ID", "")
 
 # SOGLIE BUSINESS
-MIN_ROI        = 0.15
-MIN_PROFIT_EUR = 8.0
-MIN_SCORE      = 4.0
+MIN_ROI        = 0.12   # 12% ROI minimo
+MIN_PROFIT_EUR = 6.0    # Profitto netto minimo €
+MIN_SCORE      = 3.5    # Score minimo per alert
 
-# Expensive mode: Discogs->Discogs
+# Expensive: Discogs->Discogs
 MAX_RATIO_EXPENSIVE  = 0.62
 MIN_MEDIAN_EXPENSIVE = 60.0
 MIN_WANT_EXPENSIVE   = 25
 
-# Midvalue mode: eBay->Discogs
-MAX_RATIO_MIDVALUE   = 0.58
-MIN_MEDIAN_MIDVALUE  = 35.0
-MIN_WANT_MIDVALUE    = 15
+# Midvalue: eBay->Discogs (piu permissivo)
+MAX_RATIO_MIDVALUE   = 0.65   # eBay price < 65% Discogs median
+MIN_MEDIAN_MIDVALUE  = 25.0   # Mediana Discogs minima
+MIN_WANT_MIDVALUE    = 10
 
 # FEE E SPEDIZIONI
 DISCOGS_FEE    = 0.11
