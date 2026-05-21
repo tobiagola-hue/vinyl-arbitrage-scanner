@@ -1,8 +1,8 @@
 """
-VINYL ARBITRAGE SCANNER v13
-00-05 Italia → EXPENSIVE: Discogs VG+ listing vs VG+ median (OAuth)
-06-23 Italia → MIDVALUE:  eBay listing vs Discogs lowest_price
-Fix: midvalue usa lowest_price (sempre disponibile) invece di price_suggestions
+VINYL ARBITRAGE SCANNER v14
+- eBay senza categoria (fix HTTP 500)
+- Watchlist dinamica e rotante
+- Soglie minime per trovare qualcosa
 """
 import time, traceback
 from datetime import datetime, timezone, timedelta, date
@@ -22,14 +22,14 @@ from telegram_alerts import (
     send_opportunity_alert, send_daily_summary, send_error_alert,
     send_startup_message, send_recap_expensive, send_recap_midvalue
 )
-from watchlist import WATCHLIST_EXPENSIVE, WATCHLIST_MIDVALUE
+from watchlist import WATCHLIST_EXPENSIVE, get_midvalue_watchlist
 from config import (
     MIN_SCORE, MIN_PROFIT_EUR, MIN_ROI,
     MAX_RATIO_EXPENSIVE, MIN_MEDIAN_EXPENSIVE, MIN_WANT_EXPENSIVE,
     MAX_RATIO_MIDVALUE, MIN_MEDIAN_MIDVALUE, MIN_WANT_MIDVALUE,
 )
 
-MAX_RESULTS = 5
+MAX_DISC_RESULTS = 5
 
 
 def italy_hour():
@@ -72,32 +72,22 @@ def get_label(d):
 
 
 def get_vgplus_median(release_id):
-    """Mediana VG+ da price_suggestions OAuth."""
     sugg = dc.get_price_suggestions(release_id)
     if not sugg: return 0.0
-    vgp = sg(sugg, "Very Good Plus (VG+)", "value")
-    if vgp and float(vgp) > 0: return float(vgp)
-    nm = sg(sugg, "Near Mint (NM or M-)", "value")
-    if nm and float(nm) > 0: return round(float(nm) * 0.85, 2)
-    mint = sg(sugg, "Mint (M)", "value")
-    if mint and float(mint) > 0: return round(float(mint) * 0.75, 2)
+    for cond in ("Very Good Plus (VG+)", "Near Mint (NM or M-)", "Mint (M)"):
+        v = sg(sugg, cond, "value")
+        if v and float(v) > 0:
+            mult = 1.0 if "Near Mint" in cond else 0.75 if "Mint" in cond else 1.0
+            return round(float(v) * mult, 2)
     return 0.0
 
 
-def get_discogs_reference_price(det):
-    """
-    Prezzo di riferimento Discogs per la modalita midvalue.
-    Usa lowest_price (sempre disponibile nel dettaglio release).
-    Stima: il disco si vende tipicamente a 1.5x il prezzo piu basso.
-    """
+def get_ref_price(det):
+    """Prezzo riferimento: usa lowest_price*1.5 come stima mediana."""
     try:
-        lp = det.get("lowest_price")
-        if lp and float(lp) > 0:
-            # lowest_price e il piu basso in assoluto.
-            # La mediana e tipicamente 1.4-1.8x il lowest.
-            return round(float(lp) * 1.5, 2)
-    except Exception:
-        pass
+        lp = float(det.get("lowest_price") or 0)
+        if lp > 0: return round(lp * 1.5, 2)
+    except Exception: pass
     return 0.0
 
 
@@ -116,54 +106,88 @@ def get_cheapest_vgplus(release_id):
         best_price = price
         s = lst.get("seller") or {}
         best = {
-            "price":      price,
-            "condition":  cond,
+            "price": price, "condition": cond,
             "listing_id": str(lst.get("id", "") or ""),
-            "seller":     s.get("username", "vedi link") or "vedi link",
-            "rating":     float(sg(s, "stats", "rating") or 100),
-            "reviews":    int(sg(s, "stats", "total") or 0),
+            "seller": s.get("username", "vedi link") or "vedi link",
+            "rating": float(sg(s, "stats", "rating") or 100),
+            "reviews": int(sg(s, "stats", "total") or 0),
             "ships_from": lst.get("ships_from", "EU") or "EU",
         }
     return best
 
 
-# ─── EXPENSIVE: Discogs → Discogs ──────────────────────────────
+def build_opp(opp_id, mode, release_id, artist, title, label, year,
+              country, condition, buy_price, ref_price, pdata,
+              rsigs, flags, want, sale, seller, rating, reviews,
+              buy_url, release_url, buy_site):
+    opp = {
+        "listing_id": opp_id, "source": buy_site.lower(), "mode": mode,
+        "release_id": str(release_id), "artist": artist, "title": title,
+        "label": label, "year": year, "country": country,
+        "condition": condition, "listing_price": buy_price,
+        "median_price": ref_price,
+        "est_sell_price": pdata.get("est_sell_price", 0),
+        "gross_profit": pdata.get("gross_profit", 0),
+        "roi": pdata.get("roi", 0),
+        "rarity_signals": rsigs, "red_flags": flags,
+        "wantlist_count": want, "num_for_sale": sale,
+        "seller_username": seller, "seller_rating": rating,
+        "seller_reviews": reviews,
+        "listing_url": buy_url, "release_url": release_url,
+        "buy_site": buy_site,
+    }
+    try: opp["score"] = score_opportunity(opp)
+    except Exception: opp["score"] = 5.0
+    return opp
+
+
+def alert_if_good(opp):
+    save_opportunity(opp)
+    print(f"    {'TROVATO':8} {opp['artist']} — {opp['title']} | "
+          f"€{opp['listing_price']:.0f} vs €{opp['median_price']:.0f} | "
+          f"ROI {opp['roi']*100:.0f}% | Score {opp['score']}/10")
+    if opp["score"] >= MIN_SCORE:
+        try:
+            if send_opportunity_alert(opp):
+                mark_alerted(opp["listing_id"])
+                print(f"    ALERT INVIATO")
+                time.sleep(2)
+        except Exception as e:
+            print(f"    Telegram: {e}")
+        return 1
+    return 0
+
+
+# ─── EXPENSIVE ─────────────────────────────────────────────────
 
 def analyze_expensive(release_id):
     try:
         det = dc.get_release_details(release_id)
         if not det: return 0
-
-        artist  = get_artist(det)
-        title   = det.get("title", "?") or "?"
-        label   = get_label(det)
-        year    = str(det.get("year", "") or "")
-        country = det.get("country", "EU") or "EU"
-        notes   = det.get("notes", "") or ""
-
-        try: want = int(sg(det, "community", "want", default=0) or 0)
+        artist  = get_artist(det); title = det.get("title","?") or "?"
+        label   = get_label(det);  year  = str(det.get("year","") or "")
+        country = det.get("country","EU") or "EU"
+        notes   = det.get("notes","") or ""
+        try: want = int(sg(det,"community","want",default=0) or 0)
         except Exception: want = 0
-        try: sale = int(det.get("num_for_sale", 0) or 0)
+        try: sale = int(det.get("num_for_sale",0) or 0)
         except Exception: sale = 0
 
-        if want < MIN_WANT_EXPENSIVE:
-            print(f"      Skip want={want}"); return 0
-        if sale < 1:
-            print(f"      Skip: nessuno in vendita"); return 0
+        if want < MIN_WANT_EXPENSIVE: print(f"      Skip want={want}"); return 0
+        if sale < 1: print(f"      Skip nessuno in vendita"); return 0
 
         median = get_vgplus_median(release_id)
         if median < MIN_MEDIAN_EXPENSIVE:
-            print(f"      Skip: VG+ mediana €{median:.0f} < €{MIN_MEDIAN_EXPENSIVE}"); return 0
+            print(f"      Skip mediana €{median:.0f}"); return 0
 
         listing = get_cheapest_vgplus(release_id)
-        if not listing:
-            print(f"      Skip: nessun listing VG+"); return 0
+        if not listing: print(f"      Skip nessun VG+"); return 0
 
         ratio = listing["price"] / median if median > 0 else 1.0
-        print(f"      want={want} | VG+ €{listing['price']:.0f} / mediana €{median:.0f} | {ratio:.0%}")
+        print(f"      want={want} | VG+ €{listing['price']:.0f}/€{median:.0f} | {ratio:.0%}")
 
         if ratio > MAX_RATIO_EXPENSIVE:
-            print(f"      Skip: ratio {ratio:.0%}"); return 0
+            print(f"      Skip ratio {ratio:.0%}"); return 0
 
         opp_id = f"exp_{release_id}_{date.today().isoformat()}"
         if opportunity_exists(opp_id): return 0
@@ -171,193 +195,107 @@ def analyze_expensive(release_id):
         lid = listing["listing_id"]
         buy_url = (f"https://www.discogs.com/sell/item/{lid}"
                    if lid else dc.get_marketplace_url(release_id))
-
         text  = f"{artist} {title} {label} {notes}".lower()
-        rsigs = find_rarity_signals(text)
-        flags = find_red_flags(text)
+        rsigs = find_rarity_signals(text); flags = find_red_flags(text)
         try:
-            if detect_first_press_from_matrix(notes): rsigs.append("first press (matrix)")
+            if detect_first_press_from_matrix(notes): rsigs.append("first press")
             for e in detect_engineer_initials(notes): rsigs.append(f"engineer: {e}")
         except Exception: pass
 
         try: pdata = calc_profit(listing["price"], median, listing["condition"], listing["ships_from"])
         except Exception: return 0
 
-        if pdata.get("gross_profit", 0) < MIN_PROFIT_EUR:
-            print(f"      Skip: profitto €{pdata.get('gross_profit',0):.0f}"); return 0
-        if pdata.get("roi", 0) < MIN_ROI:
-            print(f"      Skip: ROI {pdata.get('roi',0)*100:.0f}%"); return 0
+        if pdata.get("gross_profit",0) < MIN_PROFIT_EUR:
+            print(f"      Skip profitto €{pdata.get('gross_profit',0):.0f}"); return 0
+        if pdata.get("roi",0) < MIN_ROI:
+            print(f"      Skip ROI {pdata.get('roi',0)*100:.0f}%"); return 0
 
-        opp = {
-            "listing_id": opp_id, "source": "discogs", "mode": "expensive",
-            "release_id": str(release_id), "artist": artist, "title": title,
-            "label": label, "year": year, "country": country,
-            "condition": listing["condition"],
-            "listing_price": listing["price"], "median_price": median,
-            "est_sell_price": pdata.get("est_sell_price", 0),
-            "gross_profit": pdata.get("gross_profit", 0),
-            "roi": pdata.get("roi", 0),
-            "rarity_signals": rsigs, "red_flags": flags,
-            "wantlist_count": want, "num_for_sale": sale,
-            "seller_username": listing["seller"],
-            "seller_rating": listing["rating"],
-            "seller_reviews": listing["reviews"],
-            "listing_url": buy_url,
-            "release_url": dc.get_release_url(release_id),
-            "buy_site": "Discogs",
-        }
-        try: opp["score"] = score_opportunity(opp)
-        except Exception: opp["score"] = 5.0
-
-        save_opportunity(opp)
-        print(f"    TROVATO: {artist} — {title} | €{listing['price']:.0f} vs €{median:.0f} | ROI {opp['roi']*100:.0f}% | Score {opp['score']}/10")
-
-        if opp["score"] >= MIN_SCORE:
-            try:
-                if send_opportunity_alert(opp):
-                    mark_alerted(opp_id)
-                    print(f"    ALERT INVIATO")
-                    time.sleep(2)
-            except Exception as e:
-                print(f"    Telegram: {e}")
-            return 1
-        return 0
+        opp = build_opp(opp_id,"expensive",release_id,artist,title,label,year,
+                        country,listing["condition"],listing["price"],median,pdata,
+                        rsigs,flags,want,sale,listing["seller"],
+                        listing["rating"],listing["reviews"],
+                        buy_url,dc.get_release_url(release_id),"Discogs")
+        return alert_if_good(opp)
     except Exception as e:
         print(f"    Errore {release_id}: {e}"); return 0
 
 
-# ─── MIDVALUE: eBay → Discogs ──────────────────────────────────
+# ─── MIDVALUE ──────────────────────────────────────────────────
 
-def analyze_midvalue(entry):
-    artist_hint = entry.get("artist", "")
-    query       = entry.get("query", "")
+def analyze_midvalue_release(rid, artist_hint=""):
+    try:
+        det = dc.get_release_details(rid)
+        if not det: return 0
+        artist  = get_artist(det); title = det.get("title","?") or "?"
+        label   = get_label(det);  year  = str(det.get("year","") or "")
+        country = det.get("country","EU") or "EU"
+        notes   = det.get("notes","") or ""
+        try: want = int(sg(det,"community","want",default=0) or 0)
+        except Exception: want = 0
 
-    res = dc.search_releases(query=query)
-    if not res: return 0
+        if want < MIN_WANT_MIDVALUE:
+            print(f"      Skip want={want}"); return 0
 
-    releases = (res.get("results") or [])[:MAX_RESULTS]
-    found = 0
+        ref = get_ref_price(det)
+        lp  = float(det.get("lowest_price") or 0)
+        if ref < MIN_MEDIAN_MIDVALUE:
+            print(f"      Skip ref €{ref:.0f} (lowest=€{lp:.0f})"); return 0
 
-    for r in releases:
-        rid = r.get("id")
-        if not rid: continue
-        try:
-            det = dc.get_release_details(rid)
-            if not det: continue
+        print(f"  -> {artist} — {title} | lowest=€{lp:.0f} ref=€{ref:.0f} want={want}")
 
-            artist  = get_artist(det)
-            title   = det.get("title", "?") or "?"
-            label   = get_label(det)
-            year    = str(det.get("year", "") or "")
-            country = det.get("country", "EU") or "EU"
-            notes   = det.get("notes", "") or ""
+        search_artist = artist if artist != "?" else artist_hint
+        max_ebay = ref * MAX_RATIO_MIDVALUE
+        ebay = ec.find_best_listing(search_artist, title, max_price=max_ebay)
 
-            try: want = int(sg(det, "community", "want", default=0) or 0)
-            except Exception: want = 0
+        if not ebay:
+            print(f"      Nessun eBay sotto €{max_ebay:.0f}"); return 0
 
-            if want < MIN_WANT_MIDVALUE:
-                print(f"      Skip want={want}"); continue
+        ratio = ebay["total"] / ref if ref > 0 else 1.0
+        if ratio > MAX_RATIO_MIDVALUE:
+            print(f"      Skip ratio {ratio:.0%}"); return 0
 
-            # Prezzo riferimento Discogs = lowest_price * 1.5
-            ref_price = get_discogs_reference_price(det)
-            lowest_p  = float(det.get("lowest_price") or 0)
+        opp_id = f"mid_{rid}_{date.today().isoformat()}"
+        if opportunity_exists(opp_id): return 0
 
-            if ref_price < MIN_MEDIAN_MIDVALUE:
-                print(f"      Skip: ref price €{ref_price:.0f} < €{MIN_MEDIAN_MIDVALUE} (lowest=€{lowest_p:.0f})")
-                continue
+        try: pdata = calc_profit(ebay["total"], ref, "Very Good (VG)", country)
+        except Exception: return 0
 
-            print(f"  -> {artist} — {title} | Discogs lowest=€{lowest_p:.0f} | ref=€{ref_price:.0f} | want={want}")
+        if pdata.get("gross_profit",0) < MIN_PROFIT_EUR:
+            print(f"      Skip profitto €{pdata.get('gross_profit',0):.0f}"); return 0
+        if pdata.get("roi",0) < MIN_ROI:
+            print(f"      Skip ROI {pdata.get('roi',0)*100:.0f}%"); return 0
 
-            # Cerca su eBay
-            max_ebay = ref_price * MAX_RATIO_MIDVALUE
-            ebay = ec.find_best_ebay_listing(
-                artist if artist != "?" else artist_hint,
-                title,
-                max_price=max_ebay
-            )
+        text  = f"{artist} {title} {label} {notes}".lower()
+        rsigs = find_rarity_signals(text); flags = find_red_flags(text)
 
-            if not ebay:
-                print(f"      Nessun listing eBay sotto €{max_ebay:.0f}")
-                continue
-
-            ratio = ebay["total"] / ref_price if ref_price > 0 else 1.0
-            print(f"      eBay {ebay['site']}: €{ebay['total']:.0f} | ratio {ratio:.0%} vs ref €{ref_price:.0f}")
-
-            if ratio > MAX_RATIO_MIDVALUE:
-                print(f"      Skip: ratio {ratio:.0%}"); continue
-
-            opp_id = f"mid_{rid}_{date.today().isoformat()}"
-            if opportunity_exists(opp_id): continue
-
-            try: pdata = calc_profit(ebay["total"], ref_price, "Very Good (VG)", country)
-            except Exception: continue
-
-            if pdata.get("gross_profit", 0) < MIN_PROFIT_EUR:
-                print(f"      Skip: profitto €{pdata.get('gross_profit',0):.0f}"); continue
-            if pdata.get("roi", 0) < MIN_ROI:
-                print(f"      Skip: ROI {pdata.get('roi',0)*100:.0f}%"); continue
-
-            text  = f"{artist} {title} {label} {notes}".lower()
-            rsigs = find_rarity_signals(text)
-            flags = find_red_flags(text)
-
-            opp = {
-                "listing_id": opp_id, "source": "ebay", "mode": "midvalue",
-                "release_id": str(rid), "artist": artist, "title": title,
-                "label": label, "year": year, "country": country,
-                "condition": f"Used — {ebay['condition']}",
-                "listing_price": ebay["total"],
-                "median_price": ref_price,
-                "est_sell_price": pdata.get("est_sell_price", 0),
-                "gross_profit": pdata.get("gross_profit", 0),
-                "roi": pdata.get("roi", 0),
-                "rarity_signals": rsigs, "red_flags": flags,
-                "wantlist_count": want, "num_for_sale": 0,
-                "seller_username": ebay.get("seller", ""),
-                "seller_rating": 0, "seller_reviews": 0,
-                "listing_url": ebay.get("url", ""),
-                "release_url": dc.get_release_url(rid),
-                "buy_site": ebay.get("site", "eBay"),
-            }
-            try: opp["score"] = score_opportunity(opp)
-            except Exception: opp["score"] = 5.0
-
-            save_opportunity(opp)
-            print(f"    TROVATO: {artist} — {title} | eBay €{ebay['total']:.0f} vs Discogs €{ref_price:.0f} | ROI {opp['roi']*100:.0f}% | Score {opp['score']}/10")
-
-            if opp["score"] >= MIN_SCORE:
-                try:
-                    if send_opportunity_alert(opp):
-                        mark_alerted(opp_id)
-                        print(f"    ALERT INVIATO")
-                        time.sleep(2)
-                except Exception as e:
-                    print(f"    Telegram: {e}")
-                found += 1
-
-        except Exception as e:
-            print(f"    Errore release {rid}: {e}")
-        time.sleep(0.8)
-
-    return found
+        opp = build_opp(opp_id,"midvalue",rid,artist,title,label,year,
+                        country,f"Used ({ebay['condition']})",
+                        ebay["total"],ref,pdata,rsigs,flags,want,0,
+                        ebay.get("seller",""),0,0,
+                        ebay.get("url",""),dc.get_release_url(rid),
+                        ebay.get("site","eBay"))
+        return alert_if_good(opp)
+    except Exception as e:
+        print(f"    Errore release {rid}: {e}"); return 0
 
 
-def scan_expensive_query(query, name):
+def scan_query(query, name, mode, artist_hint=""):
     print(f"\n  [{name}]")
     try: res = dc.search_releases(query=query)
-    except Exception as e:
-        print(f"    Search error: {e}"); return 0
+    except Exception as e: print(f"    Search err: {e}"); return 0
     if not res: return 0
-    releases = (res.get("results") or [])[:MAX_RESULTS]
+    releases = (res.get("results") or [])[:MAX_DISC_RESULTS]
     found = 0
     for r in releases:
         try:
             rid = r.get("id")
             if not rid: continue
-            print(f"  -> {r.get('title','?')} [{rid}]")
-            found += analyze_expensive(rid)
-        except Exception as e:
-            print(f"    Err: {e}")
+            if mode == "expensive":
+                print(f"  -> {r.get('title','?')} [{rid}]")
+                found += analyze_expensive(rid)
+            else:
+                found += analyze_midvalue_release(rid, artist_hint)
+        except Exception as e: print(f"    Err: {e}")
         time.sleep(0.8)
     return found
 
@@ -367,48 +305,42 @@ def main():
     h     = italy_hour()
     recap = check_recap()
 
-    print("=" * 55)
-    print(f"VINYL ARBITRAGE v13 | Ora IT: {h}:xx | Modo: {mode.upper()}")
+    print("="*55)
+    print(f"VINYL ARBITRAGE v14 | Ora IT: {h}:xx | {mode.upper()}")
     if mode == "midvalue":
-        ebay_ok = "eBay ON" if ec.is_configured() else "eBay OFF"
-        print(f"eBay: {ebay_ok}")
-    print("=" * 55)
+        print(f"eBay: {'ON' if ec.is_configured() else 'OFF'}")
+    print("="*55)
 
     init_db()
     send_startup_message(mode)
 
     if recap == "expensive":
-        top = get_top_opportunities("expensive", limit=3, days=1)
-        send_recap_expensive(top)
+        send_recap_expensive(get_top_opportunities("expensive",3,1))
     elif recap == "midvalue_1300":
-        top = get_top_opportunities("midvalue", limit=10, days=1)
-        send_recap_midvalue(top, slot="13:00")
+        send_recap_midvalue(get_top_opportunities("midvalue",10,1),"13:00")
     elif recap == "midvalue_1800":
-        top = get_top_opportunities("midvalue", limit=10, days=1)
-        send_recap_midvalue(top, slot="18:00")
+        send_recap_midvalue(get_top_opportunities("midvalue",10,1),"18:00")
 
     if mode == "expensive":
-        watchlist = WATCHLIST_EXPENSIVE
-        print(f"\nScansione {len(watchlist)} query DISCOGS...")
-        for entry in watchlist:
-            try: scan_expensive_query(entry.get("query", ""), entry.get("name", "?"))
-            except Exception as e: print(f"  Err: {e}")
+        wl = WATCHLIST_EXPENSIVE
+        print(f"\nScansione {len(wl)} query Discogs...")
+        for e in wl:
+            try: scan_query(e["query"], e["name"], "expensive")
+            except Exception as ex: print(f"  Err: {ex}")
             time.sleep(1)
     else:
-        watchlist = WATCHLIST_MIDVALUE
-        print(f"\nScansione {len(watchlist)} artisti su EBAY + DISCOGS...")
-        for entry in watchlist:
-            try:
-                print(f"\n  [{entry.get('name','?')}]")
-                analyze_midvalue(entry)
-            except Exception as e: print(f"  Err: {e}")
+        wl = get_midvalue_watchlist(40)
+        print(f"\nScansione {len(wl)} target eBay+Discogs (dinamici)...")
+        for e in wl:
+            try: scan_query(e["query"], e["name"], "midvalue", e.get("artist",""))
+            except Exception as ex: print(f"  Err: {ex}")
             time.sleep(1)
 
     today   = get_today_stats()
     alltime = get_all_time_stats()
     print(f"\nFine | Trovate: {today['today_found']} | Alert: {today['today_alerted']}")
     send_daily_summary({
-        "scanned": len(watchlist) * MAX_RESULTS,
+        "scanned": len(wl)*MAX_DISC_RESULTS,
         "today_found": today["today_found"],
         "today_alerted": today["today_alerted"],
         **alltime,
@@ -416,10 +348,8 @@ def main():
 
 
 if __name__ == "__main__":
-    try:
-        main()
-    except KeyboardInterrupt:
-        print("\nInterrotto")
+    try: main()
+    except KeyboardInterrupt: print("\nInterrotto")
     except Exception as e:
         print(f"\nERRORE:\n{traceback.format_exc()}")
         try: send_error_alert(str(e)[:500])
