@@ -129,3 +129,4 @@ def score_opportunity(opp):
     elif ratio <= 0.45:  score += 0.3
 
     return round(max(1.0, min(10.0, score)), 1)
+
