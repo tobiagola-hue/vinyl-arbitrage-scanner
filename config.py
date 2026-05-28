@@ -35,3 +35,4 @@ RATE_LIMIT_SLEEP   = 1.2
 REQUEST_TIMEOUT    = 15
 MAX_RETRIES        = 3
 DB_PATH            = "vinyl_arbitrage.db"
+
