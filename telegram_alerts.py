@@ -134,3 +134,4 @@ def send_startup_message(mode):
         return _send(f"🚀 <b>Vinyl Scanner v15</b>\n{label} | {auth} | eBay {ebay}")
     except Exception:
         return _send("🚀 <b>Vinyl Scanner avviato</b>")
+
