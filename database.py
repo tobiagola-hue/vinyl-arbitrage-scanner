@@ -183,3 +183,4 @@ def get_top_opportunities(mode: str, limit: int = 10, hours: int = 24) -> list:
     """, (mode, f"-{hours} hours", limit)).fetchall()
     conn.close()
     return [dict(r) for r in rows]
+
