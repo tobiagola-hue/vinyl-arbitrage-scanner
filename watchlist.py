@@ -157,3 +157,4 @@ COUNTRY_VALUE_MULTIPLIERS = {
     "Netherlands": 1.10, "France": 1.05, "US": 1.00,
     "Italy": 0.90, "Australia": 0.85, "Canada": 0.90, "Spain": 0.80,
 }
+
