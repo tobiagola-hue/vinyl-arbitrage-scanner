@@ -1,10 +1,7 @@
 """
-VINYL ARBITRAGE SCANNER v15
-- Scansione ogni 30 min
-- Alert UNICO alle 4:30 IT (top3 expensive + top10 midvalue)
-- 7 giorni senza ripetizioni per release
-- Filtro ristampe eBay (non filtra album recenti)
-- Listing incerto -> solo link Discogs
+VINYL ARBITRAGE SCANNER v16
+Fix: rimosso dedup 7gg aggressivo, startup solo mezzanotte,
+riassunto silenzioso, eBay UK prima di IT.
 """
 import time, traceback
 from datetime import datetime, timezone, timedelta, date
@@ -12,8 +9,7 @@ from datetime import datetime, timezone, timedelta, date
 import discogs_client as dc
 import ebay_client as ec
 from database import (
-    init_db, was_seen_recently, mark_seen, opportunity_exists,
-    save_opportunity, mark_alerted,
+    init_db, opportunity_exists, save_opportunity,
     get_today_stats, get_all_time_stats, get_top_opportunities
 )
 from scorer import (
@@ -27,31 +23,27 @@ from telegram_alerts import (
 )
 from watchlist import WATCHLIST_EXPENSIVE, get_midvalue_watchlist
 from config import (
-    MIN_PROFIT_EUR, MIN_ROI, MIN_SCORE,
+    MIN_PROFIT_EUR, MIN_ROI,
     MAX_RATIO_EXPENSIVE, MIN_MEDIAN_EXPENSIVE, MIN_WANT_EXPENSIVE,
     MAX_RATIO_MIDVALUE, MIN_MEDIAN_MIDVALUE, MIN_WANT_MIDVALUE,
 )
 
 MAX_DISC = 5
-RECAP_HOUR   = 4
-RECAP_MINUTE = 30
 
 
 def italy_now():
     return datetime.now(timezone.utc) + timedelta(hours=1)
 
-
-def italy_hour(): return italy_now().hour
+def italy_hour():   return italy_now().hour
 def italy_minute(): return italy_now().minute
-
-
-def get_mode():
-    return "expensive" if italy_hour() < 6 else "midvalue"
-
+def get_mode():     return "expensive" if italy_hour() < 6 else "midvalue"
 
 def is_recap_time():
     h, m = italy_hour(), italy_minute()
-    return h == RECAP_HOUR and m >= RECAP_MINUTE
+    return h == 4 and 30 <= m < 59
+
+def is_first_run():
+    return italy_hour() == 0 and italy_minute() < 35
 
 
 def sg(d, *keys, default=None):
@@ -59,7 +51,6 @@ def sg(d, *keys, default=None):
         if not isinstance(d, dict): return default
         d = d.get(k, default)
     return d
-
 
 def get_artist(d):
     try:
@@ -69,13 +60,11 @@ def get_artist(d):
         return t.split(" - ")[0].strip() if " - " in t else "?"
     except Exception: return "?"
 
-
 def get_label(d):
     try:
         l = d.get("labels") or []
         return l[0].get("name","") if l else ""
     except Exception: return ""
-
 
 def get_vgplus_median(release_id):
     sugg = dc.get_price_suggestions(release_id)
@@ -87,14 +76,12 @@ def get_vgplus_median(release_id):
             return round(float(v)*mult, 2)
     return 0.0
 
-
 def get_ref_price(det):
     try:
         lp = float(det.get("lowest_price") or 0)
         if lp > 0: return round(lp*1.5, 2)
     except Exception: pass
     return 0.0
-
 
 def get_cheapest_vgplus(release_id):
     listings = dc.get_marketplace_listings(release_id)
@@ -119,13 +106,8 @@ def get_cheapest_vgplus(release_id):
     return best
 
 
-# ─── EXPENSIVE ─────────────────────────────────────────────────
-
 def analyze_expensive(release_id):
     try:
-        if was_seen_recently(str(release_id), "expensive", days=7):
-            print(f"      Skip: gia analizzato questa settimana"); return 0
-
         det = dc.get_release_details(release_id)
         if not det: return 0
         artist  = get_artist(det); title = det.get("title","?") or "?"
@@ -137,21 +119,18 @@ def analyze_expensive(release_id):
         try: sale = int(det.get("num_for_sale",0) or 0)
         except Exception: sale = 0
 
-        mark_seen(str(release_id), "expensive")
-
-        if want < MIN_WANT_EXPENSIVE: print(f"      Skip want={want}"); return 0
-        if sale < 1: print(f"      Skip nessuno in vendita"); return 0
+        if want < MIN_WANT_EXPENSIVE: return 0
+        if sale < 1: return 0
 
         median = get_vgplus_median(release_id)
-        if median < MIN_MEDIAN_EXPENSIVE:
-            print(f"      Skip mediana €{median:.0f}"); return 0
+        if median < MIN_MEDIAN_EXPENSIVE: return 0
 
         listing = get_cheapest_vgplus(release_id)
-        if not listing: print(f"      Skip nessun VG+"); return 0
+        if not listing: return 0
 
         ratio = listing["price"]/median if median > 0 else 1.0
         print(f"      want={want} | VG+ €{listing['price']:.0f}/€{median:.0f} | {ratio:.0%}")
-        if ratio > MAX_RATIO_EXPENSIVE: print(f"      Skip ratio {ratio:.0%}"); return 0
+        if ratio > MAX_RATIO_EXPENSIVE: return 0
 
         opp_id = f"exp_{release_id}_{date.today().isoformat()}"
         if opportunity_exists(opp_id): return 0
@@ -168,11 +147,8 @@ def analyze_expensive(release_id):
 
         try: pdata = calc_profit(listing["price"],median,listing["condition"],listing["ships_from"])
         except Exception: return 0
-
-        if pdata.get("gross_profit",0) < MIN_PROFIT_EUR:
-            print(f"      Skip profitto €{pdata.get('gross_profit',0):.0f}"); return 0
-        if pdata.get("roi",0) < MIN_ROI:
-            print(f"      Skip ROI {pdata.get('roi',0)*100:.0f}%"); return 0
+        if pdata.get("gross_profit",0) < MIN_PROFIT_EUR: return 0
+        if pdata.get("roi",0) < MIN_ROI: return 0
 
         opp = {
             "listing_id": opp_id, "source": "discogs", "mode": "expensive",
@@ -190,19 +166,14 @@ def analyze_expensive(release_id):
         try: opp["score"] = score_opportunity(opp)
         except Exception: opp["score"] = 5.0
         save_opportunity(opp)
-        print(f"    SALVATO: {artist} — {title} | €{listing['price']:.0f}/€{median:.0f} | ROI {opp['roi']*100:.0f}% | Score {opp['score']:.1f}")
+        print(f"    SALVATO: {artist} — {title} | ROI {opp['roi']*100:.0f}% | Score {opp['score']:.1f}")
         return 1
     except Exception as e:
         print(f"    Errore {release_id}: {e}"); return 0
 
 
-# ─── MIDVALUE ──────────────────────────────────────────────────
-
 def analyze_midvalue_release(rid, artist_hint=""):
     try:
-        if was_seen_recently(str(rid), "midvalue", days=7):
-            return 0
-
         det = dc.get_release_details(rid)
         if not det: return 0
         artist  = get_artist(det); title = det.get("title","?") or "?"
@@ -214,45 +185,33 @@ def analyze_midvalue_release(rid, artist_hint=""):
         try: orig_year = int(det.get("year",0) or 0)
         except Exception: orig_year = 0
 
-        mark_seen(str(rid), "midvalue")
-
-        if want < MIN_WANT_MIDVALUE: print(f"      Skip want={want}"); return 0
+        if want < MIN_WANT_MIDVALUE: return 0
 
         ref = get_ref_price(det)
         lp  = float(det.get("lowest_price") or 0)
-        if ref < MIN_MEDIAN_MIDVALUE:
-            print(f"      Skip ref €{ref:.0f} (lowest=€{lp:.0f})"); return 0
+        if ref < MIN_MEDIAN_MIDVALUE: return 0
 
         print(f"  -> {artist} — {title} ({orig_year}) | lowest=€{lp:.0f} ref=€{ref:.0f} want={want}")
+
+        opp_id = f"mid_{rid}_{date.today().isoformat()}"
+        if opportunity_exists(opp_id): return 0
 
         search_artist = artist if artist != "?" else artist_hint
         max_ebay = ref * MAX_RATIO_MIDVALUE
         ebay = ec.find_best_listing(search_artist, title,
                                     original_year=orig_year, max_price=max_ebay)
-
-        if not ebay:
-            print(f"      Nessun eBay sotto €{max_ebay:.0f}"); return 0
+        if not ebay: return 0
 
         ratio = ebay["total"]/ref if ref > 0 else 1.0
-        if ratio > MAX_RATIO_MIDVALUE:
-            print(f"      Skip ratio {ratio:.0%}"); return 0
-
-        opp_id = f"mid_{rid}_{date.today().isoformat()}"
-        if opportunity_exists(opp_id): return 0
+        if ratio > MAX_RATIO_MIDVALUE: return 0
 
         try: pdata = calc_profit(ebay["total"],ref,"Very Good (VG)",country)
         except Exception: return 0
-
-        if pdata.get("gross_profit",0) < MIN_PROFIT_EUR:
-            print(f"      Skip profitto €{pdata.get('gross_profit',0):.0f}"); return 0
-        if pdata.get("roi",0) < MIN_ROI:
-            print(f"      Skip ROI {pdata.get('roi',0)*100:.0f}%"); return 0
+        if pdata.get("gross_profit",0) < MIN_PROFIT_EUR: return 0
+        if pdata.get("roi",0) < MIN_ROI: return 0
 
         text  = f"{artist} {title} {label} {notes}".lower()
         rsigs = find_rarity_signals(text); flags = find_red_flags(text)
-
-        # Nota per recap: se versione incerta -> solo link
-        notes_field = "incerto" if ebay.get("uncertain") else ""
 
         opp = {
             "listing_id": opp_id, "source": "ebay", "mode": "midvalue",
@@ -267,13 +226,12 @@ def analyze_midvalue_release(rid, artist_hint=""):
             "seller_username": ebay.get("seller",""), "seller_rating": 0,
             "seller_reviews": 0, "listing_url": ebay.get("url",""),
             "release_url": dc.get_release_url(rid), "buy_site": ebay.get("site","eBay"),
-            "notes": notes_field,
+            "notes": "incerto" if ebay.get("uncertain") else "",
         }
         try: opp["score"] = score_opportunity(opp)
         except Exception: opp["score"] = 5.0
         save_opportunity(opp)
-        unc = " [INCERTO]" if notes_field else ""
-        print(f"    SALVATO{unc}: {artist} — {title} | eBay €{ebay['total']:.0f}/ref €{ref:.0f} | ROI {opp['roi']*100:.0f}%")
+        print(f"    SALVATO: {artist} — {title} | eBay €{ebay['total']:.0f}/ref €{ref:.0f} | ROI {opp['roi']*100:.0f}%")
         return 1
     except Exception as e:
         print(f"    Errore {rid}: {e}"); return 0
@@ -301,36 +259,34 @@ def scan_query(query, name, mode, artist_hint=""):
 
 
 def main():
-    mode  = get_mode()
-    h     = italy_hour()
-    m     = italy_minute()
-    recap = is_recap_time()
+    mode = get_mode()
+    h, m = italy_hour(), italy_minute()
 
     print("="*55)
-    print(f"VINYL ARBITRAGE v15 | IT {h:02d}:{m:02d} | {mode.upper()}")
+    print(f"VINYL ARBITRAGE v16 | IT {h:02d}:{m:02d} | {mode.upper()}")
     print("="*55)
 
     init_db()
-    send_startup_message(mode)
 
-    # ── Invio recap alle 4:30 ──────────────────────────────────
-    if recap:
+    if is_first_run():
+        send_startup_message(mode)
+
+    if is_recap_time():
         print("\nInvio recap 4:30...")
-        exp_opps = get_top_opportunities("expensive", limit=3, hours=28)
-        mid_opps = get_top_opportunities("midvalue",  limit=10, hours=28)
-        send_daily_recap(exp_opps, mid_opps)
+        exp = get_top_opportunities("expensive", limit=3,  hours=28)
+        mid = get_top_opportunities("midvalue",  limit=10, hours=28)
+        send_daily_recap(exp, mid)
 
-    # ── Scansione ─────────────────────────────────────────────
     if mode == "expensive":
         wl = WATCHLIST_EXPENSIVE
-        print(f"\nScansione {len(wl)} query DISCOGS expensive...")
+        print(f"\nScansione {len(wl)} query expensive...")
         for e in wl:
             try: scan_query(e["query"], e["name"], "expensive")
             except Exception as ex: print(f"  Err: {ex}")
             time.sleep(1)
     else:
         wl = get_midvalue_watchlist(40)
-        print(f"\nScansione {len(wl)} target eBay+Discogs...")
+        print(f"\nScansione {len(wl)} target midvalue...")
         for e in wl:
             try: scan_query(e["query"], e["name"], "midvalue", e.get("artist",""))
             except Exception as ex: print(f"  Err: {ex}")
@@ -338,12 +294,7 @@ def main():
 
     today   = get_today_stats()
     alltime = get_all_time_stats()
-    print(f"\nFine | Trovate: {today['today_found']} | Profitto storico: €{alltime['total_profit_eur']:.2f}")
-    send_daily_summary({
-        "scanned": len(wl)*MAX_DISC,
-        "today_found": today["today_found"],
-        **alltime,
-    })
+    print(f"\nFine | Trovate: {today['today_found']} | €{alltime['total_profit_eur']:.2f}")
 
 
 if __name__ == "__main__":
@@ -353,4 +304,3 @@ if __name__ == "__main__":
         print(f"\nERRORE:\n{traceback.format_exc()}")
         try: send_error_alert(str(e)[:500])
         except Exception: pass
-
